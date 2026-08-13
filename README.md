@@ -21,5 +21,6 @@ O place é preservado pelo Rojo para manter objetos que ainda não foram exporta
 
 - [Arquitetura](docs/architecture.md)
 - [Desenvolvimento](docs/development.md)
+- [Mecânica de descida](docs/gameplay.md)
 - [Pacotes](docs/packages.md)
 - [Guia para IA](docs/ai/guide.md)

@@ -1,0 +1,859 @@
+------------------//SERVICES
+local Players: Players = game:GetService("Players")
+local ContextActionService: ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage: ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService: RunService = game:GetService("RunService")
+local UserInputService: UserInputService = game:GetService("UserInputService")
+
+------------------//CONSTANTS
+local IS_RAMP_SLIDING_ATTRIBUTE: string = "IsRampSliding"
+local RAMP_MODE_STATE_ATTRIBUTE: string = "RampModeState"
+local RAMP_LAUNCH_ACCEPTED_ATTRIBUTE: string = "RampLaunchAccepted"
+local RAMP_LAUNCH_POWER_ATTRIBUTE: string = "RampLaunchPower"
+local RAMP_ENTRY_BOOST_SPEED_ATTRIBUTE: string = "RampEntryBoostSpeed"
+local CART_TILT_ACTIVE_ATTRIBUTE: string = "IsCartTilted"
+local CART_TILT_DIRECTION_ATTRIBUTE: string = "CartTiltDirection"
+local CART_TILT_IMPACT_ATTRIBUTE: string = "CartTiltImpact"
+local CHARGE_STATE: string = "Charge"
+local AIRBORNE_STATE: string = "Airborne"
+local SLIDE_STATE: string = "Slide"
+local EQUIPPED_CART_ATTRIBUTE: string = "EquippedCart"
+local DEFAULT_CART_NAME: string = "Default"
+local MAX_SPEED_ATTRIBUTE: string = "MaxSpeed"
+local ACCELERATION_ATTRIBUTE: string = "Acceleration"
+local COASTING_ACCELERATION_ATTRIBUTE: string = "CoastingAcceleration"
+local STEERING_ACCELERATION_ATTRIBUTE: string = "SteeringAcceleration"
+local LAUNCH_UPWARD_BOOST_ATTRIBUTE: string = "LaunchUpwardBoost"
+local LAUNCH_FORWARD_BOOST_ATTRIBUTE: string = "LaunchForwardBoost"
+local AIR_SPIN_DURATION_ATTRIBUTE: string = "AirSpinDuration"
+local AIR_ROLL_ANGLE_ATTRIBUTE: string = "AirRollAngle"
+local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
+local CART_CONTROL_REQUEST_NAME: string = "CartControlRequest"
+local FORCE_ATTACHMENT_NAME: string = "RampSlideAttachment"
+local FORCE_NAME: string = "RampSlideForce"
+local ORIENTATION_NAME: string = "RampSlideOrientation"
+local CART_TILT_ACTION_NAME: string = "RampCartTilt"
+local CART_TILT_BUTTON_TITLE: string = "VIRAR"
+local GROUND_CHECK_DISTANCE: number = 10
+local AIRBORNE_GROUND_CHECK_DISTANCE: number = 14
+local MIN_AIRBORNE_TIME: number = 0.28
+local EXTRA_DOWNWARD_ACCELERATION: number = 70
+local SURFACE_ADHESION_ACCELERATION: number = 55
+local DEFAULT_MAX_SLIDE_SPEED: number = 45
+local DEFAULT_ACCELERATION: number = 16
+local DEFAULT_COASTING_ACCELERATION: number = 8
+local DEFAULT_STEERING_ACCELERATION: number = 16
+local DEFAULT_LAUNCH_UPWARD_BOOST: number = 78
+local DEFAULT_LAUNCH_FORWARD_BOOST: number = 54
+local DEFAULT_AIR_SPIN_DURATION: number = 1.05
+local DEFAULT_AIR_ROLL_ANGLE: number = 14
+local AIR_STEERING_RESPONSIVENESS: number = 3.5
+local MIN_ORIENTATION_SPEED: number = 2
+local ORIENTATION_RESPONSIVENESS: number = 18
+local MAX_ANGULAR_VELOCITY: number = 24
+local SLIDE_FRICTION: number = 0
+local SLIDE_FRICTION_WEIGHT: number = 100
+local CART_TILT_ANGLE: number = math.rad(32)
+local CART_TILT_IMPACT_ANGLE: number = math.rad(6)
+local CART_TILT_ANIMATION_RESPONSE: number = 9
+local CART_TILT_RETURN_DURATION: number = 0.18
+local CART_TILT_IMPACT_DURATION: number = 0.32
+local CART_TILT_COOLDOWN: number = 0.35
+local CART_TILT_STEERING_MULTIPLIER: number = 3.25
+local CART_TILT_INPUT_THRESHOLD: number = 0.35
+local CART_TILT_BUTTON_POSITION: UDim2 = UDim2.new(1, -145, 1, -220)
+local OVERDRIVE_MAX_SPEED_MULTIPLIER: number = 1.28
+local OVERDRIVE_ACCELERATION_MULTIPLIER: number = 1.2
+local OVERDRIVE_COASTING_ACCELERATION_MULTIPLIER: number = 1.15
+local OVERDRIVE_STEERING_ACCELERATION_MULTIPLIER: number = 1.1
+
+------------------//DEPENDENCIES
+local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
+local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
+
+------------------//VARIABLES
+local localPlayer: Player = Players.LocalPlayer
+local character: Model = script.Parent :: Model
+local humanoid: Humanoid = character:WaitForChild("Humanoid") :: Humanoid
+local rootPart: BasePart = character:WaitForChild("HumanoidRootPart") :: BasePart
+local animator: Animator = humanoid:WaitForChild("Animator") :: Animator
+local cartControlRequest: RemoteEvent = ReplicatedStorage:WaitForChild(CART_CONTROL_REQUEST_NAME) :: RemoteEvent
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+raycastParams.FilterDescendantsInstances = {character}
+
+local isSliding: boolean = false
+local forceAttachment: Attachment?
+local slideForce: VectorForce?
+local slideOrientation: AlignOrientation?
+local animationPlayedConnection: RBXScriptConnection?
+local originalPhysicalProperties = {}
+local animateScript: LocalScript?
+local animateWasEnabled: boolean = true
+local originalWalkSpeed: number = humanoid.WalkSpeed
+local originalJumpPower: number = humanoid.JumpPower
+local originalJumpHeight: number = humanoid.JumpHeight
+local originalAutoRotate: boolean = humanoid.AutoRotate
+local originalPlatformStand: boolean = humanoid.PlatformStand
+local jumpingWasEnabled: boolean = humanoid:GetStateEnabled(Enum.HumanoidStateType.Jumping)
+local activeMaxSlideSpeed: number = DEFAULT_MAX_SLIDE_SPEED
+local activeAcceleration: number = DEFAULT_ACCELERATION
+local activeCoastingAcceleration: number = DEFAULT_COASTING_ACCELERATION
+local activeSteeringAcceleration: number = DEFAULT_STEERING_ACCELERATION
+local activeLaunchUpwardBoost: number = DEFAULT_LAUNCH_UPWARD_BOOST
+local activeLaunchForwardBoost: number = DEFAULT_LAUNCH_FORWARD_BOOST
+local activeAirSpinDuration: number = DEFAULT_AIR_SPIN_DURATION
+local activeAirRollAngle: number = DEFAULT_AIR_ROLL_ANGLE
+local configuredMaxSlideSpeed: number = DEFAULT_MAX_SLIDE_SPEED
+local configuredAcceleration: number = DEFAULT_ACCELERATION
+local configuredCoastingAcceleration: number = DEFAULT_COASTING_ACCELERATION
+local configuredSteeringAcceleration: number = DEFAULT_STEERING_ACCELERATION
+local currentSpeedLimit: number = 0
+local isAirborne: boolean = false
+local airborneElapsed: number = 0
+local airSpinAngle: number = 0
+local chargeCFrame: CFrame?
+local isCartTilted: boolean = false
+local isCartTiltActionBound: boolean = false
+local isTouchTiltHeld: boolean = false
+local requiresTiltInputRelease: boolean = false
+local tiltDirection: number = 0
+local lastTiltDirection: number = 0
+local currentTiltAngle: number = 0
+local landingStartTiltAngle: number = 0
+local landingStartedAt: number = 0
+local tiltCooldownEndsAt: number = 0
+
+------------------//FUNCTIONS
+local function project_onto_plane(vector: Vector3, normal: Vector3): Vector3
+	return vector - normal * vector:Dot(normal)
+end
+
+local function move_towards(currentValue: number, targetValue: number, maximumDelta: number): number
+	if currentValue < targetValue then
+		return math.min(currentValue + maximumDelta, targetValue)
+	end
+
+	return math.max(currentValue - maximumDelta, targetValue)
+end
+
+local function get_positive_number_attribute(instance: Instance?, attributeName: string, fallback: number): number
+	if not instance then
+		return fallback
+	end
+
+	local value = instance:GetAttribute(attributeName)
+	if type(value) ~= "number" or value <= 0 or value ~= value or value == math.huge then
+		return fallback
+	end
+
+	return value
+end
+
+local function update_overdrive_configuration(): ()
+	local isOverdriveActive = character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true
+	local maxSpeedMultiplier = if isOverdriveActive then OVERDRIVE_MAX_SPEED_MULTIPLIER else 1
+	local accelerationMultiplier = if isOverdriveActive then OVERDRIVE_ACCELERATION_MULTIPLIER else 1
+	local coastingAccelerationMultiplier = if isOverdriveActive then OVERDRIVE_COASTING_ACCELERATION_MULTIPLIER else 1
+	local steeringAccelerationMultiplier = if isOverdriveActive then OVERDRIVE_STEERING_ACCELERATION_MULTIPLIER else 1
+
+	activeMaxSlideSpeed = configuredMaxSlideSpeed * maxSpeedMultiplier
+	activeAcceleration = configuredAcceleration * accelerationMultiplier
+	activeCoastingAcceleration = configuredCoastingAcceleration * coastingAccelerationMultiplier
+	activeSteeringAcceleration = configuredSteeringAcceleration * steeringAccelerationMultiplier
+	currentSpeedLimit = math.min(currentSpeedLimit, activeMaxSlideSpeed)
+end
+
+local function update_cart_configuration(): ()
+	local equippedCart = localPlayer:GetAttribute(EQUIPPED_CART_ATTRIBUTE)
+	local cartName = if type(equippedCart) == "string" and equippedCart ~= ""
+		then equippedCart
+		else DEFAULT_CART_NAME
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local carts = assets and assets:FindFirstChild("Carts")
+	local cart = carts and carts:FindFirstChild(cartName)
+
+	configuredMaxSlideSpeed = get_positive_number_attribute(cart, MAX_SPEED_ATTRIBUTE, DEFAULT_MAX_SLIDE_SPEED)
+	configuredAcceleration = get_positive_number_attribute(cart, ACCELERATION_ATTRIBUTE, DEFAULT_ACCELERATION)
+	configuredCoastingAcceleration = get_positive_number_attribute(
+		cart,
+		COASTING_ACCELERATION_ATTRIBUTE,
+		DEFAULT_COASTING_ACCELERATION
+	)
+	configuredSteeringAcceleration = get_positive_number_attribute(
+		cart,
+		STEERING_ACCELERATION_ATTRIBUTE,
+		DEFAULT_STEERING_ACCELERATION
+	)
+	activeLaunchUpwardBoost = get_positive_number_attribute(
+		cart,
+		LAUNCH_UPWARD_BOOST_ATTRIBUTE,
+		DEFAULT_LAUNCH_UPWARD_BOOST
+	)
+	activeLaunchForwardBoost = get_positive_number_attribute(
+		cart,
+		LAUNCH_FORWARD_BOOST_ATTRIBUTE,
+		DEFAULT_LAUNCH_FORWARD_BOOST
+	)
+	activeAirSpinDuration = get_positive_number_attribute(
+		cart,
+		AIR_SPIN_DURATION_ATTRIBUTE,
+		DEFAULT_AIR_SPIN_DURATION
+	)
+	activeAirRollAngle = get_positive_number_attribute(
+		cart,
+		AIR_ROLL_ANGLE_ATTRIBUTE,
+		DEFAULT_AIR_ROLL_ANGLE
+	)
+	update_overdrive_configuration()
+end
+
+local function set_cart_tilt_effect_state(isActive: boolean, direction: number): ()
+	character:SetAttribute(CART_TILT_ACTIVE_ATTRIBUTE, isActive)
+	character:SetAttribute(CART_TILT_DIRECTION_ATTRIBUTE, direction)
+end
+
+local function clear_cart_tilt(): ()
+	isCartTilted = false
+	tiltDirection = 0
+	lastTiltDirection = 0
+	currentTiltAngle = 0
+	landingStartTiltAngle = 0
+	landingStartedAt = 0
+	requiresTiltInputRelease = false
+	set_cart_tilt_effect_state(false, 0)
+end
+
+local function start_cart_tilt_landing(): ()
+	if not isCartTilted then
+		return
+	end
+
+	isCartTilted = false
+	landingStartTiltAngle = currentTiltAngle
+	landingStartedAt = os.clock()
+	tiltCooldownEndsAt = landingStartedAt + CART_TILT_COOLDOWN
+	requiresTiltInputRelease = true
+	set_cart_tilt_effect_state(false, lastTiltDirection)
+	character:SetAttribute(CART_TILT_IMPACT_ATTRIBUTE, (character:GetAttribute(CART_TILT_IMPACT_ATTRIBUTE) or 0) + 1)
+end
+
+local function update_cart_tilt_animation(deltaTime: number): ()
+	local targetTiltAngle: number = 0
+	if isCartTilted then
+		targetTiltAngle = -tiltDirection * CART_TILT_ANGLE
+		landingStartedAt = 0
+	elseif landingStartedAt > 0 then
+		local elapsed = os.clock() - landingStartedAt
+		local returnProgress = math.clamp(elapsed / CART_TILT_RETURN_DURATION, 0, 1)
+		targetTiltAngle = landingStartTiltAngle * (1 - returnProgress)
+
+		local impactElapsed = elapsed - CART_TILT_RETURN_DURATION
+		if impactElapsed >= 0 and impactElapsed <= CART_TILT_IMPACT_DURATION then
+			local impactProgress = impactElapsed / CART_TILT_IMPACT_DURATION
+			targetTiltAngle += lastTiltDirection
+				* CART_TILT_IMPACT_ANGLE
+				* math.sin(impactProgress * math.pi)
+		elseif impactElapsed > CART_TILT_IMPACT_DURATION then
+			landingStartedAt = 0
+			landingStartTiltAngle = 0
+		end
+	end
+
+	currentTiltAngle = move_towards(
+		currentTiltAngle,
+		targetTiltAngle,
+		CART_TILT_ANIMATION_RESPONSE * deltaTime
+	)
+end
+
+local function get_keyboard_tilt_direction(): number
+	local isShiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+	local isLeftHeld = UserInputService:IsKeyDown(Enum.KeyCode.A)
+		or UserInputService:IsKeyDown(Enum.KeyCode.Left)
+	local isRightHeld = UserInputService:IsKeyDown(Enum.KeyCode.D)
+		or UserInputService:IsKeyDown(Enum.KeyCode.Right)
+	if not isShiftHeld or isLeftHeld == isRightHeld then
+		return 0
+	end
+
+	return if isRightHeld then 1 else -1
+end
+
+local function get_touch_tilt_direction(movementInput: Vector3, groundNormal: Vector3): number
+	if not isTouchTiltHeld then
+		return 0
+	end
+
+	local lateralDirection = project_onto_plane(rootPart.CFrame.RightVector, groundNormal)
+	if lateralDirection.Magnitude <= 0.01 then
+		return 0
+	end
+
+	local lateralInput = movementInput:Dot(lateralDirection.Unit)
+	if math.abs(lateralInput) < CART_TILT_INPUT_THRESHOLD then
+		return 0
+	end
+
+	return math.sign(lateralInput)
+end
+
+local function update_cart_tilt(deltaTime: number, groundNormal: Vector3, movementInput: Vector3): boolean
+	local requestedDirection = get_keyboard_tilt_direction()
+	if requestedDirection == 0 then
+		requestedDirection = get_touch_tilt_direction(movementInput, groundNormal)
+	end
+
+	if requestedDirection == 0 then
+		requiresTiltInputRelease = false
+	elseif not requiresTiltInputRelease and os.clock() >= tiltCooldownEndsAt then
+		isCartTilted = true
+		tiltDirection = requestedDirection
+		lastTiltDirection = requestedDirection
+		set_cart_tilt_effect_state(true, requestedDirection)
+	elseif isCartTilted then
+		start_cart_tilt_landing()
+	end
+
+	if isCartTilted and requestedDirection == 0 then
+		start_cart_tilt_landing()
+	end
+
+	update_cart_tilt_animation(deltaTime)
+	return isCartTilted
+end
+
+local function on_cart_tilt_action(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if not UserInputService.TouchEnabled then
+		return Enum.ContextActionResult.Pass
+	end
+
+	if inputState == Enum.UserInputState.Begin then
+		isTouchTiltHeld = true
+	elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+		isTouchTiltHeld = false
+	end
+
+	return if isSliding then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
+end
+
+local function bind_cart_tilt_action(): ()
+	if isCartTiltActionBound then
+		return
+	end
+
+	isCartTiltActionBound = true
+	ContextActionService:BindActionAtPriority(
+		CART_TILT_ACTION_NAME,
+		on_cart_tilt_action,
+		true,
+		Enum.ContextActionPriority.High.Value,
+		Enum.KeyCode.LeftShift
+	)
+	ContextActionService:SetTitle(CART_TILT_ACTION_NAME, CART_TILT_BUTTON_TITLE)
+	ContextActionService:SetPosition(CART_TILT_ACTION_NAME, CART_TILT_BUTTON_POSITION)
+end
+
+local function unbind_cart_tilt_action(): ()
+	if not isCartTiltActionBound then
+		return
+	end
+
+	isCartTiltActionBound = false
+	isTouchTiltHeld = false
+	ContextActionService:UnbindAction(CART_TILT_ACTION_NAME)
+end
+
+local function stop_animation_track(animationTrack: AnimationTrack): ()
+	animationTrack:Stop(0)
+end
+
+local function stop_all_animations(): ()
+	for _, animationTrack in animator:GetPlayingAnimationTracks() do
+		stop_animation_track(animationTrack)
+	end
+end
+
+local function set_slippery_physics(bodyPart: BasePart): ()
+	if bodyPart.Massless and not bodyPart.CanCollide then
+		return
+	end
+
+	if originalPhysicalProperties[bodyPart] == nil then
+		originalPhysicalProperties[bodyPart] = bodyPart.CustomPhysicalProperties or false
+	end
+
+	local currentProperties = bodyPart.CurrentPhysicalProperties
+	bodyPart.CustomPhysicalProperties = PhysicalProperties.new(
+		currentProperties.Density,
+		SLIDE_FRICTION,
+		currentProperties.Elasticity,
+		SLIDE_FRICTION_WEIGHT,
+		currentProperties.ElasticityWeight
+	)
+end
+
+local function restore_physics(): ()
+	for bodyPart, properties in originalPhysicalProperties do
+		if bodyPart.Parent then
+			if properties == false then
+				bodyPart.CustomPhysicalProperties = nil
+			else
+				bodyPart.CustomPhysicalProperties = properties
+			end
+		end
+	end
+	table.clear(originalPhysicalProperties)
+end
+
+local function get_ramp_ground(distance: number?): RaycastResult?
+	local result = workspace:Raycast(
+		rootPart.Position,
+		Vector3.new(0, -(distance or GROUND_CHECK_DISTANCE), 0),
+		raycastParams
+	)
+	if result and rampUtility.is_ramp(result.Instance) then
+		return result
+	end
+
+	return nil
+end
+
+local function get_surface_forward(surfaceNormal: Vector3): Vector3
+	local forwardDirection = project_onto_plane(rootPart.CFrame.LookVector, surfaceNormal)
+	if forwardDirection.Magnitude > 0.01 then
+		return forwardDirection.Unit
+	end
+
+	local velocityDirection = project_onto_plane(rootPart.AssemblyLinearVelocity, surfaceNormal)
+	if velocityDirection.Magnitude > 0.01 then
+		return velocityDirection.Unit
+	end
+
+	return rootPart.CFrame.LookVector
+end
+
+local function create_slide_actuators(): ()
+	local attachment = Instance.new("Attachment")
+	attachment.Name = FORCE_ATTACHMENT_NAME
+	attachment.Parent = rootPart
+	forceAttachment = attachment
+
+	local vectorForce = Instance.new("VectorForce")
+	vectorForce.Name = FORCE_NAME
+	vectorForce.Attachment0 = attachment
+	vectorForce.ApplyAtCenterOfMass = true
+	vectorForce.RelativeTo = Enum.ActuatorRelativeTo.World
+	vectorForce.Parent = rootPart
+	slideForce = vectorForce
+
+	local alignOrientation = Instance.new("AlignOrientation")
+	alignOrientation.Name = ORIENTATION_NAME
+	alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	alignOrientation.Attachment0 = attachment
+	alignOrientation.MaxTorque = math.huge
+	alignOrientation.MaxAngularVelocity = MAX_ANGULAR_VELOCITY
+	alignOrientation.Responsiveness = ORIENTATION_RESPONSIVENESS
+	alignOrientation.Parent = rootPart
+	slideOrientation = alignOrientation
+end
+
+local function apply_airborne_boost(): ()
+	if rootPart.AssemblyLinearVelocity.Y > 20 then
+		return
+	end
+
+	local groundResult = get_ramp_ground(AIRBORNE_GROUND_CHECK_DISTANCE)
+	local groundNormal = if groundResult then groundResult.Normal else Vector3.yAxis
+	local forwardDirection = get_surface_forward(groundNormal)
+	local launchPower = character:GetAttribute(RAMP_LAUNCH_POWER_ATTRIBUTE)
+	if type(launchPower) ~= "number" then
+		launchPower = 0.75
+	end
+	launchPower = math.clamp(launchPower, 0, 1)
+
+	local surfaceVelocity = project_onto_plane(rootPart.AssemblyLinearVelocity, groundNormal)
+	local currentForwardSpeed = surfaceVelocity:Dot(forwardDirection)
+	if currentForwardSpeed < 0 then
+		surfaceVelocity -= forwardDirection * currentForwardSpeed
+	end
+
+	local boostScale = 0.75 + launchPower * 0.25
+	rootPart.AssemblyLinearVelocity = surfaceVelocity
+		+ forwardDirection * activeLaunchForwardBoost * boostScale
+		+ Vector3.yAxis * activeLaunchUpwardBoost * boostScale
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function enter_airborne_state(): ()
+	if isAirborne then
+		return
+	end
+
+	isAirborne = true
+	chargeCFrame = nil
+	clear_cart_tilt()
+	unbind_cart_tilt_action()
+	rootPart.Anchored = false
+	airborneElapsed = 0
+	airSpinAngle = 0
+	apply_airborne_boost()
+	if slideForce then
+		slideForce.Force = Vector3.zero
+	end
+end
+
+local function enter_charge_state(): ()
+	if chargeCFrame then
+		return
+	end
+
+	chargeCFrame = rootPart.CFrame
+	clear_cart_tilt()
+	unbind_cart_tilt_action()
+	rootPart.Anchored = true
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	if slideForce then
+		slideForce.Force = Vector3.zero
+	end
+	if slideOrientation then
+		slideOrientation.CFrame = CFrame.lookAt(Vector3.zero, chargeCFrame.LookVector, chargeCFrame.UpVector)
+	end
+end
+
+local function leave_airborne_state(groundResult: RaycastResult): ()
+	isAirborne = false
+	airborneElapsed = 0
+	airSpinAngle = 0
+	local groundNormal = groundResult.Normal
+	local surfaceVelocity = project_onto_plane(rootPart.AssemblyLinearVelocity, groundNormal)
+	currentSpeedLimit = math.min(surfaceVelocity.Magnitude, activeMaxSlideSpeed)
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
+	character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, SLIDE_STATE)
+	bind_cart_tilt_action()
+	local surfaceDirection = project_onto_plane(rootPart.AssemblyLinearVelocity, groundNormal)
+	if slideOrientation and surfaceDirection.Magnitude > MIN_ORIENTATION_SPEED then
+		slideOrientation.CFrame = CFrame.lookAt(Vector3.zero, surfaceDirection.Unit, groundNormal)
+	end
+end
+
+local function get_airborne_orientation(velocity: Vector3): CFrame
+	local lookDirection = if velocity.Magnitude > MIN_ORIENTATION_SPEED
+		then velocity.Unit
+		else rootPart.CFrame.LookVector
+	local upDirection = Vector3.yAxis
+	if math.abs(lookDirection:Dot(upDirection)) > 0.96 then
+		upDirection = Vector3.zAxis
+	end
+
+	local baseOrientation = CFrame.lookAt(Vector3.zero, lookDirection, upDirection)
+	local spinProgress = math.clamp(airborneElapsed / activeAirSpinDuration, 0, 1)
+	local easedProgress = 1 - (1 - spinProgress) ^ 3
+	airSpinAngle = math.pi * 2 * easedProgress
+	local rollAngle = math.rad(activeAirRollAngle) * math.sin(airborneElapsed * 8)
+	return baseOrientation * CFrame.Angles(0, airSpinAngle, rollAngle)
+end
+
+local function update_airborne_orientation(velocity: Vector3): ()
+	if slideOrientation then
+		slideOrientation.CFrame = get_airborne_orientation(velocity)
+	end
+end
+
+local function update_airborne_physics(deltaTime: number): ()
+	airborneElapsed += deltaTime
+	local velocity = rootPart.AssemblyLinearVelocity
+	local groundResult = get_ramp_ground(AIRBORNE_GROUND_CHECK_DISTANCE)
+	if groundResult
+		and airborneElapsed >= MIN_AIRBORNE_TIME
+		and velocity:Dot(groundResult.Normal) <= 4
+	then
+		leave_airborne_state(groundResult)
+		return
+	end
+
+	local movementInput = humanoid.MoveDirection
+	local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	if movementInput.Magnitude > 0.05 then
+		local targetSpeed = math.max(horizontalVelocity.Magnitude, activeLaunchForwardBoost * 0.65)
+		local targetVelocity = movementInput.Unit * targetSpeed
+		horizontalVelocity = horizontalVelocity:Lerp(
+			targetVelocity,
+			math.clamp(deltaTime * AIR_STEERING_RESPONSIVENESS, 0, 1)
+		)
+		rootPart.AssemblyLinearVelocity = Vector3.new(horizontalVelocity.X, velocity.Y, horizontalVelocity.Z)
+		velocity = rootPart.AssemblyLinearVelocity
+	end
+
+	if slideForce then
+		slideForce.Force = Vector3.zero
+	end
+	update_airborne_orientation(velocity)
+end
+
+local function apply_entry_boost(): ()
+	local boostSpeed = character:GetAttribute(RAMP_ENTRY_BOOST_SPEED_ATTRIBUTE)
+	if type(boostSpeed) ~= "number" or boostSpeed <= 0 then
+		return
+	end
+
+	local groundResult = get_ramp_ground()
+	local groundNormal = if groundResult then groundResult.Normal else Vector3.yAxis
+	local forwardDirection = project_onto_plane(rootPart.CFrame.LookVector, groundNormal)
+	if forwardDirection.Magnitude > 0 then
+		rootPart.AssemblyLinearVelocity += forwardDirection.Unit * boostSpeed
+	end
+end
+
+local function destroy_slide_actuators(): ()
+	if slideOrientation then
+		slideOrientation:Destroy()
+		slideOrientation = nil
+	end
+	if slideForce then
+		slideForce:Destroy()
+		slideForce = nil
+	end
+	if forceAttachment then
+		forceAttachment:Destroy()
+		forceAttachment = nil
+	end
+end
+
+local function enable_slide_state(): ()
+	if isSliding then
+		return
+	end
+	isSliding = true
+	isAirborne = false
+	airborneElapsed = 0
+	airSpinAngle = 0
+	chargeCFrame = nil
+	clear_cart_tilt()
+	update_cart_configuration()
+	apply_entry_boost()
+	currentSpeedLimit = math.min(
+		Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z).Magnitude,
+		activeMaxSlideSpeed
+	)
+
+	originalWalkSpeed = humanoid.WalkSpeed
+	originalJumpPower = humanoid.JumpPower
+	originalJumpHeight = humanoid.JumpHeight
+	originalAutoRotate = humanoid.AutoRotate
+	originalPlatformStand = humanoid.PlatformStand
+	jumpingWasEnabled = humanoid:GetStateEnabled(Enum.HumanoidStateType.Jumping)
+
+	animateScript = character:FindFirstChild("Animate") :: LocalScript?
+	if animateScript and animateScript:IsA("LocalScript") then
+		animateWasEnabled = animateScript.Enabled
+		animateScript.Enabled = false
+	end
+	stop_all_animations()
+	animationPlayedConnection = animator.AnimationPlayed:Connect(stop_animation_track)
+
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.Jump = false
+	humanoid.AutoRotate = false
+	humanoid.PlatformStand = true
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+
+	for _, descendant in character:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			set_slippery_physics(descendant)
+		end
+	end
+
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	create_slide_actuators()
+	if character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == AIRBORNE_STATE then
+		enter_airborne_state()
+	elseif character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == SLIDE_STATE then
+		bind_cart_tilt_action()
+	end
+end
+
+local function disable_slide_state(): ()
+	if not isSliding then
+		return
+	end
+	isSliding = false
+	isAirborne = false
+	airborneElapsed = 0
+	airSpinAngle = 0
+	chargeCFrame = nil
+	clear_cart_tilt()
+	unbind_cart_tilt_action()
+
+	destroy_slide_actuators()
+	restore_physics()
+	if animationPlayedConnection then
+		animationPlayedConnection:Disconnect()
+		animationPlayedConnection = nil
+	end
+	if animateScript and animateScript.Parent then
+		animateScript.Enabled = animateWasEnabled
+	end
+	animateScript = nil
+
+	if humanoid.Parent and humanoid.Health > 0 then
+		humanoid.WalkSpeed = originalWalkSpeed
+		humanoid.JumpPower = originalJumpPower
+		humanoid.JumpHeight = originalJumpHeight
+		humanoid.AutoRotate = originalAutoRotate
+		humanoid.PlatformStand = originalPlatformStand
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, jumpingWasEnabled)
+	end
+end
+
+local function update_orientation(velocity: Vector3, groundNormal: Vector3): ()
+	if not slideOrientation then
+		return
+	end
+
+	local surfaceVelocity = project_onto_plane(velocity, groundNormal)
+	if surfaceVelocity.Magnitude < MIN_ORIENTATION_SPEED and math.abs(currentTiltAngle) < 0.001 then
+		return
+	end
+
+	local lookDirection = if surfaceVelocity.Magnitude >= MIN_ORIENTATION_SPEED
+		then surfaceVelocity.Unit
+		else get_surface_forward(groundNormal)
+	local targetOrientation = CFrame.lookAt(Vector3.zero, lookDirection, groundNormal)
+	slideOrientation.CFrame = targetOrientation * CFrame.Angles(0, 0, currentTiltAngle)
+end
+
+local function update_slide_physics(deltaTime: number): ()
+	if not isSliding or not slideForce then
+		return
+	end
+	if isAirborne then
+		update_airborne_physics(deltaTime)
+		return
+	end
+	if character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == CHARGE_STATE then
+		enter_charge_state()
+		if chargeCFrame then
+			rootPart.CFrame = chargeCFrame
+		end
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		slideForce.Force = Vector3.zero
+		return
+	end
+
+	local groundResult = get_ramp_ground()
+	local groundNormal = if groundResult then groundResult.Normal else Vector3.yAxis
+	local mass = rootPart.AssemblyMass
+	local velocity = rootPart.AssemblyLinearVelocity
+	local totalAcceleration = Vector3.new(0, -EXTRA_DOWNWARD_ACCELERATION, 0)
+		- groundNormal * SURFACE_ADHESION_ACCELERATION
+
+	local movementInput = project_onto_plane(humanoid.MoveDirection, groundNormal)
+	local isTiltSteering: boolean = false
+	if groundResult then
+		isTiltSteering = update_cart_tilt(deltaTime, groundNormal, movementInput)
+	else
+		start_cart_tilt_landing()
+		update_cart_tilt_animation(deltaTime)
+	end
+	if movementInput.Magnitude > 0 then
+		local steeringAcceleration = activeSteeringAcceleration
+		if isTiltSteering then
+			steeringAcceleration *= CART_TILT_STEERING_MULTIPLIER
+		end
+		totalAcceleration += movementInput.Unit * steeringAcceleration
+	end
+
+	if groundResult then
+		local outwardSpeed = velocity:Dot(groundNormal)
+		if outwardSpeed > 0 then
+			rootPart.AssemblyLinearVelocity = velocity - groundNormal * outwardSpeed
+			velocity = rootPart.AssemblyLinearVelocity
+		end
+	end
+
+	local accelerationRate = if movementInput.Magnitude > 0
+		then activeAcceleration
+		else activeCoastingAcceleration
+	currentSpeedLimit = math.min(
+		currentSpeedLimit + accelerationRate * deltaTime,
+		activeMaxSlideSpeed
+	)
+
+	local surfaceVelocity = project_onto_plane(velocity, groundNormal)
+	if surfaceVelocity.Magnitude > currentSpeedLimit then
+		local inwardSpeed = math.min(velocity:Dot(groundNormal), 0)
+		velocity = surfaceVelocity.Unit * currentSpeedLimit + groundNormal * inwardSpeed
+		rootPart.AssemblyLinearVelocity = velocity
+	end
+
+	slideForce.Force = totalAcceleration * mass
+	update_orientation(velocity, groundNormal)
+end
+
+------------------//MAIN FUNCTIONS
+local function update_slide_state(): ()
+	if character:GetAttribute(IS_RAMP_SLIDING_ATTRIBUTE) == true then
+		enable_slide_state()
+	else
+		disable_slide_state()
+	end
+end
+
+local function update_mode_state(): ()
+	if not isSliding then
+		return
+	end
+
+	if character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == AIRBORNE_STATE
+		or character:GetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE) == true
+	then
+		enter_airborne_state()
+	elseif character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == CHARGE_STATE then
+		enter_charge_state()
+	elseif character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == SLIDE_STATE then
+		bind_cart_tilt_action()
+	end
+end
+
+local function on_character_descendant_added(descendant: Instance): ()
+	if isSliding and descendant:IsA("BasePart") then
+		set_slippery_physics(descendant)
+	end
+end
+
+local function on_input_began(input: InputObject): ()
+	if not isSliding then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		cartControlRequest:FireServer("Shift")
+	end
+end
+
+------------------//INIT
+character:GetAttributeChangedSignal(IS_RAMP_SLIDING_ATTRIBUTE):Connect(update_slide_state)
+character:GetAttributeChangedSignal(RAMP_MODE_STATE_ATTRIBUTE):Connect(update_mode_state)
+character:GetAttributeChangedSignal(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE):Connect(update_mode_state)
+character:GetAttributeChangedSignal(CART_OVERDRIVE_ACTIVE_ATTRIBUTE):Connect(update_overdrive_configuration)
+character.DescendantAdded:Connect(on_character_descendant_added)
+localPlayer:GetAttributeChangedSignal(EQUIPPED_CART_ATTRIBUTE):Connect(update_cart_configuration)
+humanoid.Died:Connect(disable_slide_state)
+UserInputService.InputBegan:Connect(on_input_began)
+script.Destroying:Connect(function()
+	clear_cart_tilt()
+	unbind_cart_tilt_action()
+end)
+RunService.PreSimulation:Connect(update_slide_physics)
+update_cart_configuration()
+update_slide_state()
