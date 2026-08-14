@@ -5,8 +5,13 @@ local ReplicatedStorage: ReplicatedStorage = game:GetService("ReplicatedStorage"
 ------------------//DEPENDENCIES
 local modules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local hudAnim = require(modules:WaitForChild("Interface"):WaitForChild("HudAnim"))
+local soundUtility = require(modules:WaitForChild("Utility"):WaitForChild("SoundUtility"))
 local packages: Folder = ReplicatedFirst:WaitForChild("Packages")
+local soundData = require(packages:WaitForChild("SoundData"))
 local expressivePrompts = require(packages:WaitForChild("Main"))
+local clickSound = soundData.Click or soundData.ClickSoundId
+local hoverSound = soundData.Hover or soundData.AppearSoundId
+local openUISound = soundData.OpenUI or soundData.TriggerSoundId
 
 ------------------//VARIABLES
 local localPlayer: Player = Players.LocalPlayer
@@ -23,6 +28,12 @@ end
 ------------------//MAIN FUNCTIONS
 
 ------------------//INIT
+hudAnim.set_defaults({
+	sfx_hover = hoverSound.Value,
+	sfx_click = clickSound.Value,
+	sfx_open = openUISound.Value,
+})
+
 for _, gui in playerGui:GetChildren() do
 	setup_interface(gui)
 end

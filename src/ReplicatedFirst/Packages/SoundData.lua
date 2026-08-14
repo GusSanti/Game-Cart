@@ -12,5 +12,4 @@ return {
    ClickSoundId = Scope:Value("rbxassetid://10128760939"),
    HoldSoundId = Scope:Value("rbxassetid://421058925"),
    TriggerSoundId = Scope:Value("rbxassetid://10128766965"),
-   SoundVolume = Scope:Value(0.35),
 }

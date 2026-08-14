@@ -36,6 +36,7 @@ flowchart LR
 ### Cliente
 
 - `Audio/CharacterSounds.client.lua` reproduz sons locais associados ao personagem.
+- `Audio/LobbyMusic.client.lua` inicia a música de lobby em loop usando `SoundData` e `SoundUtility`.
 - `Interface/Bootstrap.client.lua` inicializa as animações de interface e os prompts de proximidade.
 - `Gameplay/CharacterCamera.client.lua` mantém a câmera ligada ao `Humanoid` ativo durante trocas de personagem.
 - `Gameplay/RampLaunch.client.lua` oscila o medidor horizontal, o FOV de carregamento e envia a solicitação de salto quando o jogador pressiona Espaço.
