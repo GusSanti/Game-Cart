@@ -6,8 +6,19 @@ local ServerStorage: ServerStorage = game:GetService("ServerStorage")
 
 ------------------//CONSTANTS
 local STORE_NAME: string = RunService:IsStudio() and "PlayerData_Studio_v1" or "PlayerData_v1"
+local DEFAULT_WORLD: number = 1
+local DEFAULT_COINS: number = 0
+local DEFAULT_EQUIPPED_CART: string = "Default"
+local RUNTIME_DATA_PATHS: {string} = {
+	"World",
+	"Coins",
+	"EquippedCart",
+}
 local PROFILE_TEMPLATE = {
 	TimePlayed = 0,
+	World = DEFAULT_WORLD,
+	Coins = DEFAULT_COINS,
+	EquippedCart = DEFAULT_EQUIPPED_CART,
 
 	Settings = {
 		MusicEnabled = true,
@@ -26,6 +37,41 @@ local store = profileStoreModule.New(STORE_NAME, PROFILE_TEMPLATE)
 local profilesByUserId: { [number]: any } = {}
 
 ------------------//FUNCTIONS
+local function normalize_profile_data(profileData: any): ()
+	local world = profileData.World
+	if type(world) ~= "number" or world ~= world or world < DEFAULT_WORLD or world == math.huge then
+		profileData.World = DEFAULT_WORLD
+	else
+		profileData.World = math.floor(world)
+	end
+
+	local coins = profileData.Coins
+	if type(coins) ~= "number" or coins ~= coins or coins < DEFAULT_COINS or coins == math.huge then
+		profileData.Coins = DEFAULT_COINS
+	else
+		profileData.Coins = math.floor(coins)
+	end
+
+	if type(profileData.EquippedCart) ~= "string" or profileData.EquippedCart == "" then
+		profileData.EquippedCart = DEFAULT_EQUIPPED_CART
+	end
+end
+
+local function replicate_runtime_data(player: Player, profileData: any): ()
+	for _, path in RUNTIME_DATA_PATHS do
+		player:SetAttribute(path, profileData[path])
+		dataUtility.server.bind(player, path, function(value: any)
+			player:SetAttribute(path, value)
+		end)
+	end
+end
+
+local function clear_runtime_data(player: Player): ()
+	for _, path in RUNTIME_DATA_PATHS do
+		player:SetAttribute(path, nil)
+	end
+end
+
 local function attach_player_profile(player: Player): ()
 	local profile = store:StartSessionAsync(tostring(player.UserId))
 	if not profile then
@@ -34,9 +80,11 @@ local function attach_player_profile(player: Player): ()
 	end
 
 	profile:Reconcile()
+	normalize_profile_data(profile.Data)
 	profile:AddUserId(player.UserId)
 	profilesByUserId[player.UserId] = profile
 	dataUtility.server.attach_profile(player, profile)
+	replicate_runtime_data(player, profile.Data)
 
 	task.spawn(function()
 		while player.Parent and profilesByUserId[player.UserId] do
@@ -50,6 +98,7 @@ local function attach_player_profile(player: Player): ()
 
 	profile.OnSessionEnd:Connect(function()
 		dataUtility.server.detach_profile(player)
+		clear_runtime_data(player)
 		profilesByUserId[player.UserId] = nil
 	end)
 end

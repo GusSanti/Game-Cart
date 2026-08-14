@@ -7,6 +7,7 @@ local JUMP_SOUND_ID = "rbxassetid://139980012524397"
 local DEFAULT_RUNNING_SOUND_ID = "rbxasset://sounds/action_footsteps_plastic.mp3"
 local BASE_FOOTSTEP_SPEED = 16
 local MIN_RUNNING_SPEED = 1
+local CHARACTER_LOAD_TIMEOUT = 5
 
 ------------------//VARIABLES
 local player = Players.LocalPlayer
@@ -75,8 +76,19 @@ end
 local function bind_character(character: Model): ()
 	clear_character()
 
-	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
-	local rootPart = character:WaitForChild("HumanoidRootPart") :: BasePart
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+		or character:WaitForChild("Humanoid", CHARACTER_LOAD_TIMEOUT)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+		or character:WaitForChild("HumanoidRootPart", CHARACTER_LOAD_TIMEOUT)
+	if player.Character ~= character
+		or not humanoid
+		or not humanoid:IsA("Humanoid")
+		or not rootPart
+		or not rootPart:IsA("BasePart")
+	then
+		return
+	end
+
 	local jumpSound = create_sound("Jumping", JUMP_SOUND_ID, rootPart, false)
 	local runningSound = create_sound("Running", DEFAULT_RUNNING_SOUND_ID, rootPart, true)
 	runningSound.Volume = 0
