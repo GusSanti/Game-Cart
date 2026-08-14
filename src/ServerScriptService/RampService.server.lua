@@ -17,6 +17,8 @@ local CART_MAX_HEALTH_ATTRIBUTE: string = "CartMaxHealth"
 local CART_HEALTH_ATTRIBUTE: string = "CartHealth"
 local CART_LAST_IMPACT_ATTRIBUTE: string = "CartLastImpactAt"
 local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
+local CART_JUMP_ACTIVE_ATTRIBUTE: string = "CartJumpActive"
+local CART_JUMP_POWER_ATTRIBUTE: string = "CartJumpPower"
 local RAMP_LAUNCH_REQUEST_NAME: string = "RampLaunchRequest"
 local CART_CONTROL_REQUEST_NAME: string = "CartControlRequest"
 local LAUNCH_UPWARD_BOOST_ATTRIBUTE: string = "LaunchUpwardBoost"
@@ -32,10 +34,17 @@ local GROUND_CHECK_DISTANCE: number = 10
 local GROUND_LOST_GRACE_PERIOD: number = 0.45
 local GROUND_CHECK_INTERVAL: number = 0.1
 local AIRBORNE_GRACE_PERIOD: number = 4
+local MINIMUM_AIRBORNE_LANDING_DURATION: number = 0.28
+local MAXIMUM_LANDING_VERTICAL_SPEED: number = 4
 local MAX_CART_HEALTH_ATTRIBUTE: string = "MaxCartHealth"
 local DEFAULT_MAX_CART_HEALTH: number = 3
 local CLEAN_RUN_DURATION: number = 8
 local MIN_CONTROL_REQUEST_INTERVAL: number = 0.12
+local JUMP_COOLDOWN_DURATION: number = 1.35
+local MINIMUM_JUMP_POWER: number = 0.15
+local MAXIMUM_JUMP_POWER: number = 1
+local MINIMUM_JUMP_UPWARD_BOOST: number = 72
+local MAXIMUM_JUMP_UPWARD_BOOST: number = 112
 
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
@@ -55,6 +64,7 @@ type ActiveSlide = {
 	cleanRunElapsed: number,
 	lastImpactAt: number,
 	lastControlRequestAt: number,
+	lastJumpAt: number,
 }
 
 local registeredJumpAreas: {[BasePart]: boolean} = {}
@@ -146,6 +156,8 @@ local function stop_sliding(player: Player): ()
 		slide.character:SetAttribute(IS_RAMP_SLIDING_ATTRIBUTE, false)
 		slide.character:SetAttribute(RAMP_WORLD_ATTRIBUTE, nil)
 		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+		slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
+		slide.character:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, nil)
 	end
 
 	if slide then
@@ -175,6 +187,7 @@ local function begin_sliding(player: Player, character: Model, launchArea: BaseP
 		cleanRunElapsed = 0,
 		lastImpactAt = currentTime,
 		lastControlRequestAt = -math.huge,
+		lastJumpAt = -math.huge,
 	}
 
 	activeCharacter:SetAttribute(IS_RAMP_SLIDING_ATTRIBUTE, true)
@@ -185,6 +198,8 @@ local function begin_sliding(player: Player, character: Model, launchArea: BaseP
 	activeCharacter:SetAttribute(CART_HEALTH_ATTRIBUTE, maxCartHealth)
 	activeCharacter:SetAttribute(CART_LAST_IMPACT_ATTRIBUTE, currentTime)
 	activeCharacter:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+	activeCharacter:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
+	activeCharacter:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, 0)
 	activeCharacter:SetAttribute(
 		RAMP_MODE_STATE_ATTRIBUTE,
 		if characterSwap then CHARGE_STATE else SLIDE_STATE
@@ -233,24 +248,51 @@ local function on_launch_request(player: Player, requestedPower: number): ()
 	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, AIRBORNE_STATE)
 end
 
-local function on_cart_control_request(player: Player, controlName: string): ()
-	if controlName ~= "Shift" then
-		return
-	end
-
+local function on_cart_control_request(player: Player, controlName: string, controlValue: number?): ()
 	local slide = activeSlidesByPlayer[player]
 	if not slide or player.Character ~= slide.character then
 		return
 	end
 
 	local currentTime = os.clock()
-	if currentTime - slide.lastControlRequestAt < MIN_CONTROL_REQUEST_INTERVAL then
+	if controlName == "Shift" then
+		if currentTime - slide.lastControlRequestAt < MIN_CONTROL_REQUEST_INTERVAL then
+			return
+		end
+
+		slide.lastControlRequestAt = currentTime
+		slide.cleanRunElapsed = 0
+		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
 		return
 	end
 
-	slide.lastControlRequestAt = currentTime
+	if controlName ~= "Jump"
+		or type(controlValue) ~= "number"
+		or controlValue ~= controlValue
+		or slide.character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) ~= SLIDE_STATE
+		or currentTime - slide.lastJumpAt < JUMP_COOLDOWN_DURATION
+	then
+		return
+	end
+
+	local rootPart = slide.character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local jumpPower = math.clamp(controlValue, MINIMUM_JUMP_POWER, MAXIMUM_JUMP_POWER)
+	local upwardBoost = MINIMUM_JUMP_UPWARD_BOOST
+		+ (MAXIMUM_JUMP_UPWARD_BOOST - MINIMUM_JUMP_UPWARD_BOOST) * jumpPower
+	slide.lastJumpAt = currentTime
+	slide.launchedAt = currentTime
+	slide.lastGroundedAt = currentTime
 	slide.cleanRunElapsed = 0
 	slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+	slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, true)
+	slide.character:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, jumpPower)
+	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
+	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, AIRBORNE_STATE)
+	rootPart.AssemblyLinearVelocity += Vector3.yAxis * upwardBoost
 end
 
 local function get_player_from_hit(hitPart: BasePart): (Player?, Model?)
@@ -334,6 +376,27 @@ local function is_player_on_launch_surface(player: Player, slide: ActiveSlide): 
 	return type(playerWorld) == "number" and playerWorld == rampUtility.get_world_id(result.Instance)
 end
 
+local function try_land_airborne_slide(player: Player, slide: ActiveSlide, currentTime: number): boolean
+	if currentTime - slide.launchedAt < MINIMUM_AIRBORNE_LANDING_DURATION
+		or not is_player_on_launch_surface(player, slide)
+	then
+		return false
+	end
+
+	local rootPart = slide.character:FindFirstChild("HumanoidRootPart")
+	if not rootPart
+		or not rootPart:IsA("BasePart")
+		or rootPart.AssemblyLinearVelocity.Y > MAXIMUM_LANDING_VERTICAL_SPEED
+	then
+		return false
+	end
+
+	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
+	slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
+	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, SLIDE_STATE)
+	return true
+end
+
 ------------------//MAIN FUNCTIONS
 local function on_player_added(player: Player): ()
 	player.CharacterAdded:Connect(function(character: Model)
@@ -388,6 +451,9 @@ local function update_active_slides(deltaTime: number): ()
 	local currentTime = os.clock()
 	for player, slide in activeSlidesByPlayer do
 		local modeState = slide.character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE)
+		if modeState == SLIDE_STATE and slide.character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true then
+			slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
+		end
 		local lastImpactAt = slide.character:GetAttribute(CART_LAST_IMPACT_ATTRIBUTE)
 		if type(lastImpactAt) == "number" and lastImpactAt > slide.lastImpactAt then
 			slide.lastImpactAt = lastImpactAt
@@ -405,6 +471,8 @@ local function update_active_slides(deltaTime: number): ()
 		if player.Character ~= slide.character or not slide.character.Parent then
 			stop_sliding(player)
 		elseif modeState == CHARGE_STATE and slide.launchArea.Parent then
+			slide.lastGroundedAt = currentTime
+		elseif modeState == AIRBORNE_STATE and try_land_airborne_slide(player, slide, currentTime) then
 			slide.lastGroundedAt = currentTime
 		elseif is_player_on_launch_surface(player, slide) then
 			slide.lastGroundedAt = currentTime
