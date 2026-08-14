@@ -1,6 +1,7 @@
 ------------------//SERVICES
 local Players: Players = game:GetService("Players")
 local ReplicatedStorage: ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService: RunService = game:GetService("RunService")
 local TweenService: TweenService = game:GetService("TweenService")
 
 ------------------//CONSTANTS
@@ -23,6 +24,11 @@ local HEALTH_GUI_NAME: string = "CartHealthGui"
 local HEALTH_LABEL_NAME: string = "HealthLabel"
 local HEALTH_FILL_NAME: string = "HealthFill"
 local IMPACT_FLASH_NAME: string = "ImpactFlash"
+local GENERATED_COLLECTIBLES_FOLDER_NAME: string = "GeneratedCollectibles"
+local COIN_TEMPLATE_NAME: string = "Coin"
+local COIN_COLLECTED_ATTRIBUTE: string = "IsCollected"
+local COIN_SURFACE_RIGHT_ATTRIBUTE: string = "CoinSurfaceRight"
+local COIN_SURFACE_UP_ATTRIBUTE: string = "CoinSurfaceUp"
 local SPARK_TEXTURE: string = "rbxasset://textures/particles/sparkles_main.dds"
 local SPARK_RATE: number = 90
 local IMPACT_SPARK_COUNT: number = 28
@@ -37,6 +43,8 @@ local IMPACT_FLASH_OUT_DURATION: number = 0.3
 local IMPACT_FLASH_COUNT: number = 3
 local IMPACT_HIGHLIGHT_VISIBLE_DURATION: number = 0.08
 local IMPACT_HIGHLIGHT_HIDDEN_DURATION: number = 0.07
+local COIN_SPIN_SPEED: number = math.rad(240)
+local COIN_UPRIGHT_ANGLE: number = math.rad(90)
 
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
@@ -60,6 +68,7 @@ local healthGui: ScreenGui?
 local healthLabel: TextLabel?
 local healthFill: Frame?
 local impactFlash: Frame?
+local coinRotationByCoin: {[BasePart]: number} = {}
 
 ------------------//FUNCTIONS
 local function clear_connections(): ()
@@ -448,6 +457,46 @@ local function emit_landing_sparks(): ()
 	end
 end
 
+local function track_coin(instance: Instance): ()
+	if not instance:IsA("BasePart") or instance.Name ~= COIN_TEMPLATE_NAME then
+		return
+	end
+
+	local surfaceRight = instance:GetAttribute(COIN_SURFACE_RIGHT_ATTRIBUTE)
+	local surfaceUp = instance:GetAttribute(COIN_SURFACE_UP_ATTRIBUTE)
+	if typeof(surfaceRight) ~= "Vector3" or typeof(surfaceUp) ~= "Vector3" then
+		return
+	end
+
+	coinRotationByCoin[instance] = 0
+end
+
+local function update_coin_visuals(deltaTime: number): ()
+	for coin, rotation in coinRotationByCoin do
+		if not coin.Parent or coin:GetAttribute(COIN_COLLECTED_ATTRIBUTE) == true then
+			coinRotationByCoin[coin] = nil
+			continue
+		end
+		if coin.CanTouch ~= true then
+			continue
+		end
+
+		local surfaceRight = coin:GetAttribute(COIN_SURFACE_RIGHT_ATTRIBUTE)
+		local surfaceUp = coin:GetAttribute(COIN_SURFACE_UP_ATTRIBUTE)
+		if typeof(surfaceRight) ~= "Vector3" or typeof(surfaceUp) ~= "Vector3" then
+			coinRotationByCoin[coin] = nil
+			continue
+		end
+
+		local nextRotation = (rotation + COIN_SPIN_SPEED * deltaTime) % (math.pi * 2)
+		coinRotationByCoin[coin] = nextRotation
+		local surfaceCFrame = CFrame.fromMatrix(coin.Position, surfaceRight, surfaceUp)
+		coin.CFrame = surfaceCFrame
+			* CFrame.Angles(0, nextRotation, 0)
+			* CFrame.Angles(COIN_UPRIGHT_ANGLE, 0, 0)
+	end
+end
+
 local function unbind_character(): ()
 	clear_connections()
 	clear_spark_effects()
@@ -497,6 +546,13 @@ ensure_health_gui()
 impactFeedback.OnClientEvent:Connect(on_impact_feedback)
 localPlayer.CharacterAdded:Connect(bind_character)
 localPlayer.CharacterRemoving:Connect(unbind_character)
+
+local generatedCollectiblesFolder = workspace:WaitForChild(GENERATED_COLLECTIBLES_FOLDER_NAME)
+for _, descendant in generatedCollectiblesFolder:GetDescendants() do
+	track_coin(descendant)
+end
+generatedCollectiblesFolder.DescendantAdded:Connect(track_coin)
+RunService.RenderStepped:Connect(update_coin_visuals)
 
 if localPlayer.Character then
 	bind_character(localPlayer.Character)

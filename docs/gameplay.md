@@ -22,11 +22,15 @@ Ao entrar na área, o modelo em `ReplicatedStorage.Assets.Carts.<EquippedCart>.P
 
 Ao pressionar Espaço, o servidor valida o salto; o carrinho recebe o impulso vertical/frontal configurado no modelo equipado, executa um giro cartunesco interpolado e segue a física de descida após o lançamento.
 
+## Salto turbo durante a descida
+
+Enquanto o carrinho esta em `Slide`, segure Espaço para carregar a barra de `SALTO TURBO` e solte para pular. Em dispositivos moveis, use o botao de contexto `PULAR`. A carga leva `1.2` segundos para atingir 100% e o servidor valida o pedido, aplica um impulso vertical de acordo com a carga e respeita um intervalo de `1.35` segundos entre saltos. Durante a subida, o carrinho empina para cima; ao cair, inclina o nariz para baixo antes de retomar a pista.
+
 ## Inclinação do carrinho
 
 Durante a descida e com o carrinho em contato com a rampa, o jogador pode incliná-lo para uma das laterais. No teclado, segure `Shift` e pressione `A`/`D` ou `←`/`→`. Em dispositivos móveis, segure o botão de contexto `VIRAR` e direcione o analógico virtual para a esquerda ou direita.
 
-Enquanto está inclinado, o carrinho solta faíscas pelas rodas do lado encostado no chão e sua força de direção é multiplicada por `3.25`, tornando as curvas muito mais rápidas e menos previsíveis. Ao soltar o comando, ele retorna ao chão com uma pequena animação de impacto; a manobra fica indisponível por `2` segundos e exige que o jogador solte o comando antes de usá-la novamente.
+Enquanto está inclinado, o carrinho solta faíscas pelas rodas do lado encostado no chão e sua força de direção é multiplicada por `3.25`, tornando as curvas muito mais rápidas e menos previsíveis. A barra de inclinação permite `1.7` segundos de uso continuo e recarrega em `1.1` segundos ao soltar o comando. Ao soltar o comando, ele retorna ao chão com uma pequena animação de impacto; a manobra fica indisponível por `0.35` segundos e exige que o jogador solte o comando antes de usá-la novamente.
 
 ## Configuração dos carrinhos
 
@@ -42,5 +46,6 @@ O controlador procura o modelo indicado por `EquippedCart` dentro de `Replicated
 | `LaunchForwardBoost` | `58` | impulso para frente do salto |
 | `AirSpinDuration` | `1.05` | duração do giro cartunesco no ar |
 | `AirRollAngle` | `14` | amplitude do balanço lateral durante o giro |
+| `TiltAngle` | `40` | limite de inclinação lateral em graus |
 
 Os mesmos valores do carrinho `Default` são usados como fallback caso o asset ou algum atributo ainda não exista.
