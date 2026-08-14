@@ -11,6 +11,7 @@ local IS_RAMP_SLIDING_ATTRIBUTE: string = "IsRampSliding"
 local RAMP_MODE_STATE_ATTRIBUTE: string = "RampModeState"
 local RAMP_LAUNCH_ACCEPTED_ATTRIBUTE: string = "RampLaunchAccepted"
 local RAMP_LAUNCH_POWER_ATTRIBUTE: string = "RampLaunchPower"
+local RAMP_AIRBORNE_VELOCITY_ATTRIBUTE: string = "RampAirborneVelocity"
 local RAMP_WORLD_ATTRIBUTE: string = "RampWorld"
 local IS_RAMP_CART_CHARACTER_ATTRIBUTE: string = "IsRampCartCharacter"
 local CART_MAX_HEALTH_ATTRIBUTE: string = "CartMaxHealth"
@@ -19,6 +20,10 @@ local CART_LAST_IMPACT_ATTRIBUTE: string = "CartLastImpactAt"
 local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
 local CART_JUMP_ACTIVE_ATTRIBUTE: string = "CartJumpActive"
 local CART_JUMP_POWER_ATTRIBUTE: string = "CartJumpPower"
+local CART_FLOW_ATTRIBUTE: string = "CartFlow"
+local CART_FLOW_MAXIMUM_ATTRIBUTE: string = "CartFlowMaximum"
+local CART_JUMP_ENERGY_ATTRIBUTE: string = "CartJumpEnergy"
+local CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE: string = "CartJumpEnergyMaximum"
 local RAMP_LAUNCH_REQUEST_NAME: string = "RampLaunchRequest"
 local CART_CONTROL_REQUEST_NAME: string = "CartControlRequest"
 local LAUNCH_UPWARD_BOOST_ATTRIBUTE: string = "LaunchUpwardBoost"
@@ -37,19 +42,19 @@ local AIRBORNE_GRACE_PERIOD: number = 4
 local MINIMUM_AIRBORNE_LANDING_DURATION: number = 0.28
 local MAXIMUM_LANDING_VERTICAL_SPEED: number = 4
 local MAX_CART_HEALTH_ATTRIBUTE: string = "MaxCartHealth"
-local DEFAULT_MAX_CART_HEALTH: number = 3
-local CLEAN_RUN_DURATION: number = 8
+local DEFAULT_MAX_CART_HEALTH: number = 1
 local MIN_CONTROL_REQUEST_INTERVAL: number = 0.12
-local JUMP_COOLDOWN_DURATION: number = 1.35
-local MINIMUM_JUMP_POWER: number = 0.15
-local MAXIMUM_JUMP_POWER: number = 1
-local MINIMUM_JUMP_UPWARD_BOOST: number = 72
-local MAXIMUM_JUMP_UPWARD_BOOST: number = 112
+local MINIMUM_TILT_REWARD_INTERVAL: number = 0.8
+local REQUIRED_JUMP_POWER: number = 1
+local JUMP_UPWARD_BOOST: number = 30
+local MINIMUM_JUMP_FORWARD_SPEED: number = 28
+local JUMP_FORWARD_BOOST: number = 4
 
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local serverModules: Folder = ServerStorage:WaitForChild("Modules")
 local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
+local cartGameplayConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("CartGameplayConfig"))
 local rampCharacterService = require(serverModules:WaitForChild("RampCharacterService"))
 
 ------------------//VARIABLES
@@ -61,10 +66,14 @@ type ActiveSlide = {
 	launchedAt: number,
 	canLaunch: boolean,
 	launchRequested: boolean,
-	cleanRunElapsed: number,
 	lastImpactAt: number,
 	lastControlRequestAt: number,
 	lastJumpAt: number,
+	lastTiltRewardAt: number,
+	lastObservedFlow: number,
+	lastFlowActionAt: number,
+	overdriveEndsAt: number,
+	jumpEnergy: number,
 }
 
 local registeredJumpAreas: {[BasePart]: boolean} = {}
@@ -158,6 +167,10 @@ local function stop_sliding(player: Player): ()
 		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
 		slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
 		slide.character:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, nil)
+		slide.character:SetAttribute(CART_FLOW_ATTRIBUTE, nil)
+		slide.character:SetAttribute(CART_FLOW_MAXIMUM_ATTRIBUTE, nil)
+		slide.character:SetAttribute(CART_JUMP_ENERGY_ATTRIBUTE, nil)
+		slide.character:SetAttribute(CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE, nil)
 	end
 
 	if slide then
@@ -184,22 +197,31 @@ local function begin_sliding(player: Player, character: Model, launchArea: BaseP
 		launchedAt = 0,
 		canLaunch = characterSwap ~= nil,
 		launchRequested = false,
-		cleanRunElapsed = 0,
 		lastImpactAt = currentTime,
 		lastControlRequestAt = -math.huge,
 		lastJumpAt = -math.huge,
+		lastTiltRewardAt = -math.huge,
+		lastObservedFlow = 0,
+		lastFlowActionAt = currentTime,
+		overdriveEndsAt = 0,
+		jumpEnergy = cartGameplayConfig.jumpEnergyMaximum,
 	}
 
 	activeCharacter:SetAttribute(IS_RAMP_SLIDING_ATTRIBUTE, true)
 	activeCharacter:SetAttribute(RAMP_WORLD_ATTRIBUTE, launchAreaWorld)
 	activeCharacter:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
 	activeCharacter:SetAttribute(RAMP_LAUNCH_POWER_ATTRIBUTE, MIN_LAUNCH_POWER)
+	activeCharacter:SetAttribute(RAMP_AIRBORNE_VELOCITY_ATTRIBUTE, nil)
 	activeCharacter:SetAttribute(CART_MAX_HEALTH_ATTRIBUTE, maxCartHealth)
 	activeCharacter:SetAttribute(CART_HEALTH_ATTRIBUTE, maxCartHealth)
 	activeCharacter:SetAttribute(CART_LAST_IMPACT_ATTRIBUTE, currentTime)
 	activeCharacter:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
 	activeCharacter:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
 	activeCharacter:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, 0)
+	activeCharacter:SetAttribute(CART_FLOW_ATTRIBUTE, 0)
+	activeCharacter:SetAttribute(CART_FLOW_MAXIMUM_ATTRIBUTE, cartGameplayConfig.flowMaximum)
+	activeCharacter:SetAttribute(CART_JUMP_ENERGY_ATTRIBUTE, cartGameplayConfig.jumpEnergyMaximum)
+	activeCharacter:SetAttribute(CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE, cartGameplayConfig.jumpEnergyMaximum)
 	activeCharacter:SetAttribute(
 		RAMP_MODE_STATE_ATTRIBUTE,
 		if characterSwap then CHARGE_STATE else SLIDE_STATE
@@ -226,12 +248,12 @@ local function on_launch_request(player: Player, requestedPower: number): ()
 
 	slide.launchRequested = true
 	slide.launchedAt = os.clock()
-	slide.cleanRunElapsed = 0
 	slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
 	set_character_root_anchored(slide.character, false)
 	local launchPower = math.clamp(requestedPower, MIN_LAUNCH_POWER, MAX_LAUNCH_POWER)
 	local rootPart = slide.character:FindFirstChild("HumanoidRootPart")
 	if rootPart and rootPart:IsA("BasePart") then
+		rootPart:SetNetworkOwner(player)
 		local surfaceNormal = slide.launchArea.CFrame.UpVector
 		local forwardDirection = rootPart.CFrame.LookVector - surfaceNormal * rootPart.CFrame.LookVector:Dot(surfaceNormal)
 		if forwardDirection.Magnitude < 0.01 then
@@ -240,12 +262,56 @@ local function on_launch_request(player: Player, requestedPower: number): ()
 		local upwardBoost = get_cart_number_attribute(player, LAUNCH_UPWARD_BOOST_ATTRIBUTE, DEFAULT_LAUNCH_UPWARD_BOOST)
 		local forwardBoost = get_cart_number_attribute(player, LAUNCH_FORWARD_BOOST_ATTRIBUTE, DEFAULT_LAUNCH_FORWARD_BOOST)
 		local boostScale = 0.75 + launchPower * 0.25
-		rootPart.AssemblyLinearVelocity = forwardDirection.Unit * forwardBoost * boostScale
+		local launchVelocity = forwardDirection.Unit * forwardBoost * boostScale
 			+ Vector3.yAxis * upwardBoost * boostScale
+		slide.character:SetAttribute(RAMP_AIRBORNE_VELOCITY_ATTRIBUTE, launchVelocity)
+		rootPart.AssemblyLinearVelocity = launchVelocity
 	end
 	slide.character:SetAttribute(RAMP_LAUNCH_POWER_ATTRIBUTE, launchPower)
+	local launchFlow = launchPower * cartGameplayConfig.flowLaunchRewardMaximum
+	slide.character:SetAttribute(CART_FLOW_ATTRIBUTE, launchFlow)
+	slide.lastObservedFlow = launchFlow
+	slide.lastFlowActionAt = os.clock()
 	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, true)
 	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, AIRBORNE_STATE)
+end
+
+local function get_cart_jump_velocity(rootPart: BasePart): Vector3
+	local velocity = rootPart.AssemblyLinearVelocity
+	local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	local rootForwardDirection = Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z)
+	local forwardDirection = if horizontalVelocity.Magnitude > 0.01
+		then horizontalVelocity.Unit
+		elseif rootForwardDirection.Magnitude > 0.01
+			then rootForwardDirection.Unit
+			else Vector3.zAxis
+	local forwardSpeed = math.max(horizontalVelocity.Magnitude, MINIMUM_JUMP_FORWARD_SPEED) + JUMP_FORWARD_BOOST
+	return forwardDirection * forwardSpeed + Vector3.yAxis * JUMP_UPWARD_BOOST
+end
+
+local function get_jump_energy_cost(): number
+	return cartGameplayConfig.jumpMaximumEnergyCost
+end
+
+local function set_slide_flow(slide: ActiveSlide, flowValue: number, currentTime: number): ()
+	local clampedFlow = math.clamp(flowValue, 0, cartGameplayConfig.flowMaximum)
+	slide.character:SetAttribute(CART_FLOW_ATTRIBUTE, clampedFlow)
+	slide.lastObservedFlow = clampedFlow
+	if clampedFlow > 0 then
+		slide.lastFlowActionAt = currentTime
+	end
+end
+
+local function add_slide_flow(slide: ActiveSlide, flowReward: number, currentTime: number): ()
+	if flowReward <= 0 or slide.character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true then
+		return
+	end
+
+	local currentFlow = slide.character:GetAttribute(CART_FLOW_ATTRIBUTE)
+	if type(currentFlow) ~= "number" then
+		currentFlow = 0
+	end
+	set_slide_flow(slide, currentFlow + flowReward, currentTime)
 end
 
 local function on_cart_control_request(player: Player, controlName: string, controlValue: number?): ()
@@ -255,22 +321,25 @@ local function on_cart_control_request(player: Player, controlName: string, cont
 	end
 
 	local currentTime = os.clock()
-	if controlName == "Shift" then
+	if controlName == "Tilt" then
 		if currentTime - slide.lastControlRequestAt < MIN_CONTROL_REQUEST_INTERVAL then
 			return
 		end
 
 		slide.lastControlRequestAt = currentTime
-		slide.cleanRunElapsed = 0
-		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+		if currentTime - slide.lastTiltRewardAt >= MINIMUM_TILT_REWARD_INTERVAL then
+			slide.lastTiltRewardAt = currentTime
+			add_slide_flow(slide, cartGameplayConfig.flowTiltReward, currentTime)
+		end
 		return
 	end
 
 	if controlName ~= "Jump"
 		or type(controlValue) ~= "number"
 		or controlValue ~= controlValue
+		or controlValue ~= REQUIRED_JUMP_POWER
 		or slide.character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) ~= SLIDE_STATE
-		or currentTime - slide.lastJumpAt < JUMP_COOLDOWN_DURATION
+		or currentTime - slide.lastJumpAt < cartGameplayConfig.jumpMinimumInterval
 	then
 		return
 	end
@@ -280,19 +349,24 @@ local function on_cart_control_request(player: Player, controlName: string, cont
 		return
 	end
 
-	local jumpPower = math.clamp(controlValue, MINIMUM_JUMP_POWER, MAXIMUM_JUMP_POWER)
-	local upwardBoost = MINIMUM_JUMP_UPWARD_BOOST
-		+ (MAXIMUM_JUMP_UPWARD_BOOST - MINIMUM_JUMP_UPWARD_BOOST) * jumpPower
+	if slide.jumpEnergy < cartGameplayConfig.jumpEnergyMaximum then
+		return
+	end
+
+	local jumpPower = REQUIRED_JUMP_POWER
+	local jumpEnergyCost = get_jump_energy_cost()
+	local jumpVelocity = get_cart_jump_velocity(rootPart)
+	slide.jumpEnergy = math.max(slide.jumpEnergy - jumpEnergyCost, 0)
 	slide.lastJumpAt = currentTime
 	slide.launchedAt = currentTime
 	slide.lastGroundedAt = currentTime
-	slide.cleanRunElapsed = 0
-	slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+	slide.character:SetAttribute(CART_JUMP_ENERGY_ATTRIBUTE, slide.jumpEnergy)
 	slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, true)
 	slide.character:SetAttribute(CART_JUMP_POWER_ATTRIBUTE, jumpPower)
+	slide.character:SetAttribute(RAMP_AIRBORNE_VELOCITY_ATTRIBUTE, jumpVelocity)
 	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
 	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, AIRBORNE_STATE)
-	rootPart.AssemblyLinearVelocity += Vector3.yAxis * upwardBoost
+	rootPart.AssemblyLinearVelocity = jumpVelocity
 end
 
 local function get_player_from_hit(hitPart: BasePart): (Player?, Model?)
@@ -390,11 +464,72 @@ local function try_land_airborne_slide(player: Player, slide: ActiveSlide, curre
 	then
 		return false
 	end
+	local isCartJump = slide.character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true
+	local isPerfectLanding = isCartJump and slide.lastImpactAt <= slide.launchedAt
+	if isPerfectLanding then
+		add_slide_flow(slide, cartGameplayConfig.flowLandingReward, currentTime)
+		slide.jumpEnergy = math.min(
+			slide.jumpEnergy + cartGameplayConfig.perfectLandingEnergyRefund,
+			cartGameplayConfig.jumpEnergyMaximum
+		)
+		slide.character:SetAttribute(CART_JUMP_ENERGY_ATTRIBUTE, slide.jumpEnergy)
+	end
 
 	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
 	slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
 	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, SLIDE_STATE)
 	return true
+end
+
+local function update_slide_resources(
+	slide: ActiveSlide,
+	modeState: string?,
+	currentTime: number,
+	deltaTime: number
+): ()
+	local lastImpactAt = slide.character:GetAttribute(CART_LAST_IMPACT_ATTRIBUTE)
+	if type(lastImpactAt) == "number" and lastImpactAt > slide.lastImpactAt then
+		slide.lastImpactAt = lastImpactAt
+		slide.overdriveEndsAt = 0
+		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+		set_slide_flow(slide, 0, currentTime)
+	end
+
+	local flowAttribute = slide.character:GetAttribute(CART_FLOW_ATTRIBUTE)
+	local currentFlow = if type(flowAttribute) == "number"
+		then math.clamp(flowAttribute, 0, cartGameplayConfig.flowMaximum)
+		else 0
+	if currentFlow > slide.lastObservedFlow then
+		slide.lastFlowActionAt = currentTime
+	end
+
+	local isOverdriveActive = slide.character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true
+	if isOverdriveActive then
+		if currentTime >= slide.overdriveEndsAt then
+			slide.overdriveEndsAt = 0
+			slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
+			currentFlow = 0
+		end
+	elseif modeState == SLIDE_STATE and currentFlow >= cartGameplayConfig.flowMaximum then
+		slide.overdriveEndsAt = currentTime + cartGameplayConfig.overdriveDuration
+		slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, true)
+		currentFlow = cartGameplayConfig.flowMaximum
+	elseif currentFlow > 0 and currentTime - slide.lastFlowActionAt >= cartGameplayConfig.flowDecayDelay then
+		currentFlow = math.max(currentFlow - cartGameplayConfig.flowDecayRate * deltaTime, 0)
+	end
+
+	if currentFlow ~= flowAttribute then
+		slide.character:SetAttribute(CART_FLOW_ATTRIBUTE, currentFlow)
+	end
+	slide.lastObservedFlow = currentFlow
+
+	if modeState == SLIDE_STATE and slide.jumpEnergy < cartGameplayConfig.jumpEnergyMaximum then
+		slide.jumpEnergy = math.min(
+			slide.jumpEnergy + cartGameplayConfig.jumpEnergyRegenerationRate * deltaTime,
+			cartGameplayConfig.jumpEnergyMaximum
+		)
+		slide.character:SetAttribute(CART_JUMP_ENERGY_ATTRIBUTE, slide.jumpEnergy)
+	end
 end
 
 ------------------//MAIN FUNCTIONS
@@ -454,19 +589,7 @@ local function update_active_slides(deltaTime: number): ()
 		if modeState == SLIDE_STATE and slide.character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true then
 			slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)
 		end
-		local lastImpactAt = slide.character:GetAttribute(CART_LAST_IMPACT_ATTRIBUTE)
-		if type(lastImpactAt) == "number" and lastImpactAt > slide.lastImpactAt then
-			slide.lastImpactAt = lastImpactAt
-			slide.cleanRunElapsed = 0
-			slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
-		elseif modeState == SLIDE_STATE then
-			slide.cleanRunElapsed += slideDeltaTime
-		end
-
-		local shouldEnableOverdrive = modeState == SLIDE_STATE and slide.cleanRunElapsed >= CLEAN_RUN_DURATION
-		if slide.character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) ~= shouldEnableOverdrive then
-			slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, shouldEnableOverdrive)
-		end
+		update_slide_resources(slide, modeState, currentTime, slideDeltaTime)
 
 		if player.Character ~= slide.character or not slide.character.Parent then
 			stop_sliding(player)
@@ -500,7 +623,7 @@ for _, player in Players:GetPlayers() do
 end
 
 workspace.DescendantAdded:Connect(register_jump_area_instance)
-	Players.PlayerAdded:Connect(on_player_added)
+Players.PlayerAdded:Connect(on_player_added)
 Players.PlayerRemoving:Connect(on_player_removing)
 launchRequest.OnServerEvent:Connect(on_launch_request)
 cartControlRequest.OnServerEvent:Connect(on_cart_control_request)

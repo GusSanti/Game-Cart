@@ -19,6 +19,9 @@ local RAMP_WORLD_ATTRIBUTE: string = "RampWorld"
 local CART_MAX_HEALTH_ATTRIBUTE: string = "CartMaxHealth"
 local CART_HEALTH_ATTRIBUTE: string = "CartHealth"
 local CART_LAST_IMPACT_ATTRIBUTE: string = "CartLastImpactAt"
+local CART_FLOW_ATTRIBUTE: string = "CartFlow"
+local CART_FLOW_MAXIMUM_ATTRIBUTE: string = "CartFlowMaximum"
+local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
 local GENERATED_WORLD_ATTRIBUTE: string = "World"
 local OBSTACLE_DAMAGE_ATTRIBUTE: string = "Damage"
 local OBSTACLE_SCALE_ATTRIBUTE: string = "SpawnScale"
@@ -27,9 +30,15 @@ local OBSTACLE_DESPAWNING_ATTRIBUTE: string = "IsDespawning"
 local COIN_COLLECTED_ATTRIBUTE: string = "IsCollected"
 local COIN_SURFACE_RIGHT_ATTRIBUTE: string = "CoinSurfaceRight"
 local COIN_SURFACE_UP_ATTRIBUTE: string = "CoinSurfaceUp"
+local COIN_REWARD_ATTRIBUTE: string = "Reward"
+local COIN_FLOW_REWARD_ATTRIBUTE: string = "FlowReward"
+local COIN_RISK_ATTRIBUTE: string = "IsRiskCoin"
+local COIN_CHAIN_ID_ATTRIBUTE: string = "ChainId"
+local COIN_CHAIN_ORDER_ATTRIBUTE: string = "ChainOrder"
+local COIN_CHAIN_LENGTH_ATTRIBUTE: string = "ChainLength"
+local COIN_CHAIN_BONUS_ATTRIBUTE: string = "ChainBonus"
 local WAVE_ID_ATTRIBUTE: string = "WaveId"
 local WAVE_SEED_ATTRIBUTE: string = "WaveSeed"
-local COIN_REWARD_VALUE: number = 1
 local LANE_MULTIPLIERS: {number} = {-0.82, -0.4, 0, 0.4, 0.82}
 local WAVE_TRANSITION_DELAY: number = 2.5
 local WAVE_SPAWN_DURATION: number = 0.45
@@ -47,20 +56,26 @@ local OBSTACLE_FLASH_COUNT: number = 3
 local SPAWN_SIZE_SCALE: number = 0.15
 local COIN_COLLECT_SIZE_SCALE: number = 0.1
 local SPAWN_TRANSPARENCY: number = 0.2
-local TARGET_OBSTACLE_SEGMENT_LENGTH: number = 72
-local MINIMUM_OBSTACLE_SEGMENTS_PER_RAMP_PART: number = 24
-local MAXIMUM_OBSTACLE_SEGMENTS_PER_RAMP_PART: number = 32
-local MINIMUM_OBSTACLES_PER_SEGMENT: number = 2
-local MAXIMUM_OBSTACLES_PER_SEGMENT: number = 3
-local OBSTACLE_ROWS_PER_SEGMENT: number = 2
-local OBSTACLE_LONGITUDINAL_JITTER_MULTIPLIER: number = 0.32
-local OBSTACLE_LATERAL_JITTER_MULTIPLIER: number = 0.16
-local MAX_OBSTACLES_PER_WAVE: number = 340
+local TARGET_ENCOUNTER_LENGTH: number = 86
+local MINIMUM_ENCOUNTERS_PER_RAMP_PART: number = 4
+local MAXIMUM_ENCOUNTERS_PER_RAMP_PART: number = 28
+local OBSTACLE_LONGITUDINAL_JITTER_MULTIPLIER: number = 0.04
+local OBSTACLE_LATERAL_JITTER_MULTIPLIER: number = 0.055
+local MAX_OBSTACLES_PER_WAVE: number = 700
+local OBSTACLE_CLUSTER_COUNT: number = 2
+local OBSTACLE_CLUSTER_SPACING_MULTIPLIER: number = 0.55
+local JUMP_GATE_CLUSTER_COUNT: number = 5
 local WIDE_TEMPLATE_SMALL_WEIGHT_FACTOR: number = 0.12
 local WIDE_TEMPLATE_MINIMUM_WIDTH: number = 20
-local MINIMUM_OBSTACLE_SCALE: number = 1
-local MAXIMUM_OBSTACLE_SCALE: number = 2
+local MINIMUM_OBSTACLE_SCALE: number = 0.78
+local MAXIMUM_OBSTACLE_SCALE: number = 2.25
+local SOFT_OBSTACLE_MAXIMUM_SCALE: number = 0.94
+local HEAVY_OBSTACLE_MINIMUM_SCALE: number = 1.8
+local JUMP_GATE_MAXIMUM_TEMPLATE_HEIGHT: number = 7.5
 local DEFAULT_OBSTACLE_DAMAGE: number = 1
+local SOFT_IMPACT_SPEED_RETENTION: number = 0.72
+local NORMAL_IMPACT_SPEED_RETENTION: number = 0.56
+local HEAVY_IMPACT_SPEED_RETENTION: number = 0.42
 local MINIMUM_RAMP_LENGTH: number = 180
 local ENTRY_SAFE_DISTANCE: number = 115
 local EXIT_SAFE_DISTANCE: number = 50
@@ -70,21 +85,32 @@ local SURFACE_RAYCAST_DISTANCE: number = 180
 local SURFACE_CLEARANCE: number = 0.04
 local COIN_SURFACE_CLEARANCE: number = 1.25
 local COIN_UPRIGHT_ANGLE: number = math.rad(90)
-local COIN_CHAINS_PER_RAMP_PART: number = 6
-local MINIMUM_COINS_PER_CHAIN: number = 8
-local MAXIMUM_COINS_PER_CHAIN: number = 20
-local COIN_SPACING: number = 8
-local COIN_CHAIN_START_PADDING: number = 10
-local COIN_LANE_FOLLOW_ALPHA: number = 0.38
+local MINIMUM_COINS_PER_CHAIN: number = 4
+local MAXIMUM_COINS_PER_CHAIN: number = 7
+local COIN_CHAIN_SEGMENT_INTERVAL: number = 2
+local COIN_CHAIN_START_PADDING: number = 9
 local COIN_MAX_CURVE_OFFSET: number = 12
 local COIN_MINIMUM_SCALE: number = 1.65
 local COIN_MAXIMUM_SCALE: number = 2.25
 local COIN_COLLECTION_SIZE_MULTIPLIER: number = 1.35
 local COIN_COLLECTION_DEPTH: number = 6
+local COIN_SAFE_REWARD: number = 1
+local COIN_RISK_REWARD: number = 2
+local COIN_GOLD_REWARD: number = 5
+local COIN_SAFE_CHAIN_BONUS: number = 2
+local COIN_RISK_CHAIN_BONUS: number = 4
+local COIN_JUMP_CHAIN_BONUS: number = 5
+local JUMP_COIN_ARC_HEIGHT: number = 10
+local PATTERN_SLALOM: string = "Slalom"
+local PATTERN_FORK: string = "Fork"
+local PATTERN_CHICANE: string = "Chicane"
+local PATTERN_JUMP_GATE: string = "JumpGate"
+local PATTERN_BREATHER: string = "Breather"
 
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
+local cartGameplayConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("CartGameplayConfig"))
 local dataUtility = require(replicatedModules:WaitForChild("Data"):WaitForChild("DataUtility"))
 
 ------------------//VARIABLES
@@ -95,13 +121,29 @@ type SegmentLayout = {
 	startDistance: number,
 	endDistance: number,
 	lateralRange: number,
+	entryLaneIndex: number,
 	safeLaneIndex: number,
+	rewardLaneIndex: number,
+	patternName: string,
+}
+type PatternRow = {
+	distanceAlpha: number,
+	openLaneIndices: {number},
+	scaleMinimum: number,
+	scaleMaximum: number,
+	damageOverride: number?,
 }
 type PendingObstacleSpawn = {
 	template: Instance,
 	spawnCFrame: CFrame,
 	waveId: number,
 	obstacleScale: number,
+	damage: number,
+	isRollingBarrel: boolean,
+}
+type CoinChainState = {
+	chainId: string,
+	nextOrder: number,
 }
 
 local generatedObstaclesFolder: Folder
@@ -124,6 +166,7 @@ local characterConnections: {[Model]: ConnectionSet} = {}
 local trackedCharacters: {[Model]: boolean} = {}
 local pendingCoinRewardsByPlayer: {[Player]: number} = {}
 local coinSaveScheduledByPlayer: {[Player]: boolean} = {}
+local coinChainStateByPlayer: {[Player]: CoinChainState} = {}
 local pendingObstacleSpawnElapsed: number = 0
 
 ------------------//FUNCTIONS
@@ -164,6 +207,29 @@ local function get_positive_integer_attribute(instance: Instance, attributeName:
 	end
 
 	return math.max(math.floor(value), 1)
+end
+
+local function get_nonnegative_integer_attribute(instance: Instance, attributeName: string): number?
+	local value = instance:GetAttribute(attributeName)
+	if type(value) ~= "number" or value < 0 or value ~= value or value == math.huge then
+		return nil
+	end
+
+	return math.max(math.floor(value), 0)
+end
+
+local function add_character_flow(character: Model, flowReward: number): ()
+	if flowReward <= 0 or character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true then
+		return
+	end
+
+	local currentFlow = character:GetAttribute(CART_FLOW_ATTRIBUTE)
+	local maximumFlow = character:GetAttribute(CART_FLOW_MAXIMUM_ATTRIBUTE)
+	if type(currentFlow) ~= "number" or type(maximumFlow) ~= "number" or maximumFlow <= 0 then
+		return
+	end
+
+	character:SetAttribute(CART_FLOW_ATTRIBUTE, math.clamp(currentFlow + flowReward, 0, maximumFlow))
 end
 
 local function get_world_folder(rootFolder: Folder, worldId: number): Folder
@@ -212,7 +278,12 @@ local function get_obstacle_templates(): {Instance}
 	local templates: {Instance} = {}
 
 	for _, template in obstacles:GetChildren() do
-		if is_obstacle_instance(template) then
+		local duplicateBarrelPart = template:IsA("BasePart")
+			and (string.find(string.lower(template.Name), "barrel", 1, true) ~= nil
+				or string.find(string.lower(template.Name), "barril", 1, true) ~= nil)
+			and obstacles:FindFirstChild(template.Name)
+			and obstacles:FindFirstChild(template.Name):IsA("Model")
+		if is_obstacle_instance(template) and not duplicateBarrelPart then
 			table.insert(templates, template)
 		end
 	end
@@ -238,6 +309,13 @@ local function get_template_weight(template: Instance, prefersWideTemplate: bool
 	end
 
 	local _, templateSize = get_instance_bounds(template)
+	local partCount = #get_obstacle_parts(template)
+	local complexityFactor = if partCount > 16
+		then 0.06
+		elseif partCount > 6 then 0.2
+		elseif partCount > 3 then 0.5
+		else 1
+	weight *= complexityFactor
 	if prefersWideTemplate and math.max(templateSize.X, templateSize.Z) < WIDE_TEMPLATE_MINIMUM_WIDTH then
 		return weight * WIDE_TEMPLATE_SMALL_WEIGHT_FACTOR
 	end
@@ -264,6 +342,18 @@ local function select_template(random: Random, templates: {Instance}, prefersWid
 	end
 
 	return templates[#templates]
+end
+
+local function select_jump_gate_template(random: Random, templates: {Instance}): Instance?
+	local jumpTemplates: {Instance} = {}
+	for _, template in templates do
+		local _, templateSize = get_instance_bounds(template)
+		if #get_obstacle_parts(template) <= 3 and templateSize.Y <= JUMP_GATE_MAXIMUM_TEMPLATE_HEIGHT then
+			table.insert(jumpTemplates, template)
+		end
+	end
+
+	return select_template(random, if #jumpTemplates > 0 then jumpTemplates else templates, true)
 end
 
 local function get_downhill_direction(rampPart: BasePart, surfaceNormal: Vector3): Vector3
@@ -345,6 +435,8 @@ end
 local function set_obstacle_interaction(obstacle: Instance, canCollide: boolean, canTouch: boolean, canQuery: boolean): ()
 	for _, part in get_obstacle_parts(obstacle) do
 		part.Anchored = true
+		part.AssemblyLinearVelocity = Vector3.zero
+		part.AssemblyAngularVelocity = Vector3.zero
 		part.CanCollide = canCollide
 		part.CanTouch = canTouch
 		part.CanQuery = canQuery
@@ -438,15 +530,19 @@ local function flush_pending_coin_rewards(player: Player): ()
 	dataUtility.server.set(player, "Coins", updatedCoins)
 end
 
-local function award_coin(player: Player): ()
+local function award_coin(player: Player, rewardValue: number): ()
+	if rewardValue <= 0 then
+		return
+	end
+
 	local visibleCoins = player:GetAttribute("Coins")
 	if type(visibleCoins) ~= "number" then
 		local savedCoins = dataUtility.server.get(player, "Coins")
 		visibleCoins = if type(savedCoins) == "number" then savedCoins else 0
 	end
 
-	player:SetAttribute("Coins", visibleCoins + COIN_REWARD_VALUE)
-	pendingCoinRewardsByPlayer[player] = (pendingCoinRewardsByPlayer[player] or 0) + COIN_REWARD_VALUE
+	player:SetAttribute("Coins", visibleCoins + rewardValue)
+	pendingCoinRewardsByPlayer[player] = (pendingCoinRewardsByPlayer[player] or 0) + rewardValue
 	if coinSaveScheduledByPlayer[player] then
 		return
 	end
@@ -506,6 +602,42 @@ local function begin_obstacle_cooldown(obstacle: Instance): ()
 	end)
 end
 
+local function update_coin_chain(player: Player, character: Model, coin: BasePart): ()
+	local chainId = coin:GetAttribute(COIN_CHAIN_ID_ATTRIBUTE)
+	local chainOrder = coin:GetAttribute(COIN_CHAIN_ORDER_ATTRIBUTE)
+	local chainLength = coin:GetAttribute(COIN_CHAIN_LENGTH_ATTRIBUTE)
+	if type(chainId) ~= "string"
+		or type(chainOrder) ~= "number"
+		or type(chainLength) ~= "number"
+	then
+		coinChainStateByPlayer[player] = nil
+		return
+	end
+
+	local chainState = coinChainStateByPlayer[player]
+	if chainOrder == 1 then
+		chainState = {
+			chainId = chainId,
+			nextOrder = 2,
+		}
+		coinChainStateByPlayer[player] = chainState
+	elseif not chainState or chainState.chainId ~= chainId or chainState.nextOrder ~= chainOrder then
+		coinChainStateByPlayer[player] = nil
+		return
+	else
+		chainState.nextOrder += 1
+	end
+
+	if chainOrder < chainLength then
+		return
+	end
+
+	local chainBonus = get_positive_integer_attribute(coin, COIN_CHAIN_BONUS_ATTRIBUTE) or 0
+	award_coin(player, chainBonus)
+	add_character_flow(character, cartGameplayConfig.flowChainBonus)
+	coinChainStateByPlayer[player] = nil
+end
+
 local function apply_obstacle_damage(obstacle: Instance, hitPart: BasePart): ()
 	if obstacle:GetAttribute(OBSTACLE_COOLDOWN_ATTRIBUTE) == true then
 		return
@@ -524,7 +656,7 @@ local function apply_obstacle_damage(obstacle: Instance, hitPart: BasePart): ()
 
 	local maxHealth = get_positive_integer_attribute(character, CART_MAX_HEALTH_ATTRIBUTE)
 	local currentHealth = get_positive_integer_attribute(character, CART_HEALTH_ATTRIBUTE)
-	local damage = get_positive_integer_attribute(obstacle, OBSTACLE_DAMAGE_ATTRIBUTE) or DEFAULT_OBSTACLE_DAMAGE
+	local damage = get_nonnegative_integer_attribute(obstacle, OBSTACLE_DAMAGE_ATTRIBUTE) or DEFAULT_OBSTACLE_DAMAGE
 	if not maxHealth or not currentHealth then
 		return
 	end
@@ -547,8 +679,18 @@ local function apply_obstacle_damage(obstacle: Instance, hitPart: BasePart): ()
 	damagedCharacters[character] = true
 
 	local remainingHealth = math.max(currentHealth - damage, 0)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		local speedRetention = if damage <= 0
+			then SOFT_IMPACT_SPEED_RETENTION
+			elseif damage == 1 then NORMAL_IMPACT_SPEED_RETENTION
+			else HEAVY_IMPACT_SPEED_RETENTION
+		rootPart.AssemblyLinearVelocity *= speedRetention
+	end
 	character:SetAttribute(CART_HEALTH_ATTRIBUTE, remainingHealth)
 	character:SetAttribute(CART_LAST_IMPACT_ATTRIBUTE, currentTime)
+	character:SetAttribute(CART_FLOW_ATTRIBUTE, 0)
+	character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, false)
 	begin_obstacle_cooldown(obstacle)
 	impactFeedback:FireClient(player, damage, remainingHealth, maxHealth)
 
@@ -584,7 +726,14 @@ local function collect_coin(coin: BasePart, hitPart: BasePart): ()
 		collectionHitbox.CanTouch = false
 		collectionHitbox.CanQuery = false
 	end
-	award_coin(player)
+	local coinReward = get_positive_integer_attribute(coin, COIN_REWARD_ATTRIBUTE) or COIN_SAFE_REWARD
+	local flowReward = coin:GetAttribute(COIN_FLOW_REWARD_ATTRIBUTE)
+	award_coin(player, coinReward)
+	add_character_flow(
+		character,
+		if type(flowReward) == "number" and flowReward > 0 then flowReward else cartGameplayConfig.flowCoinReward
+	)
+	update_coin_chain(player, character, coin)
 
 	local collectTween = TweenService:Create(
 		coin,
@@ -723,6 +872,106 @@ local function animate_obstacle_spawn(obstacle: Instance, targetBoundsCFrame: CF
 	end
 end
 
+local function start_rolling_barrel(model: Model, targetBoundsCFrame: CFrame, obstacleScale: number): ()
+	if not model.Parent then
+		return
+	end
+
+	local boundsCFrame = model:GetBoundingBox()
+	local boundsFromPivot = model:GetPivot():ToObjectSpace(boundsCFrame)
+	local surfaceNormal = targetBoundsCFrame.UpVector
+	local downhillDirection = targetBoundsCFrame.LookVector
+	if surfaceNormal.Magnitude < 0.99 or downhillDirection.Magnitude < 0.99 then
+		return
+	end
+
+	local targetPosition = targetBoundsCFrame.Position
+	local dropPosition = targetPosition + surfaceNormal * cartGameplayConfig.rollingBarrelDropHeight * obstacleScale
+	model:PivotTo((targetBoundsCFrame + surfaceNormal * cartGameplayConfig.rollingBarrelDropHeight * obstacleScale) * boundsFromPivot:Inverse())
+	model:SetAttribute(cartGameplayConfig.rollingBarrelBoundsAttribute, boundsFromPivot)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelTargetAttribute, targetPosition)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelDropAttribute, dropPosition)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelDirectionAttribute, downhillDirection.Unit)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelNormalAttribute, surfaceNormal.Unit)
+	model:SetAttribute(
+		cartGameplayConfig.rollingBarrelSpeedAttribute,
+		cartGameplayConfig.rollingBarrelSpeed * math.clamp(obstacleScale, 0.9, 1.35)
+	)
+	model:SetAttribute(
+		cartGameplayConfig.rollingBarrelSpinAttribute,
+		cartGameplayConfig.rollingBarrelSpinSpeed * math.clamp(obstacleScale, 0.9, 1.35)
+	)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelElapsedAttribute, 0)
+	model:SetAttribute(cartGameplayConfig.rollingBarrelAttribute, true)
+end
+
+local function update_rolling_barrels(deltaTime: number): ()
+	for _, instance in generatedObstaclesFolder:GetDescendants() do
+		if not instance:IsA("Model")
+			or instance:GetAttribute(cartGameplayConfig.rollingBarrelAttribute) ~= true
+		then
+			continue
+		end
+
+		local elapsed = instance:GetAttribute(cartGameplayConfig.rollingBarrelElapsedAttribute)
+		local boundsFromPivot = instance:GetAttribute(cartGameplayConfig.rollingBarrelBoundsAttribute)
+		local targetPosition = instance:GetAttribute(cartGameplayConfig.rollingBarrelTargetAttribute)
+		local dropPosition = instance:GetAttribute(cartGameplayConfig.rollingBarrelDropAttribute)
+		local downhillDirection = instance:GetAttribute(cartGameplayConfig.rollingBarrelDirectionAttribute)
+		local surfaceNormal = instance:GetAttribute(cartGameplayConfig.rollingBarrelNormalAttribute)
+		local rollSpeed = instance:GetAttribute(cartGameplayConfig.rollingBarrelSpeedAttribute)
+		local spinSpeed = instance:GetAttribute(cartGameplayConfig.rollingBarrelSpinAttribute)
+		if type(elapsed) ~= "number"
+			or typeof(boundsFromPivot) ~= "CFrame"
+			or typeof(targetPosition) ~= "Vector3"
+			or typeof(dropPosition) ~= "Vector3"
+			or typeof(downhillDirection) ~= "Vector3"
+			or typeof(surfaceNormal) ~= "Vector3"
+			or type(rollSpeed) ~= "number"
+			or type(spinSpeed) ~= "number"
+		then
+			instance:SetAttribute(cartGameplayConfig.rollingBarrelAttribute, false)
+			continue
+		end
+
+		elapsed += deltaTime
+		instance:SetAttribute(cartGameplayConfig.rollingBarrelElapsedAttribute, elapsed)
+		if elapsed >= cartGameplayConfig.rollingBarrelLifetime then
+			instance:SetAttribute(cartGameplayConfig.rollingBarrelAttribute, false)
+			instance:SetAttribute(OBSTACLE_DESPAWNING_ATTRIBUTE, true)
+			set_obstacle_interaction(instance, false, false, false)
+			disconnect_obstacle(instance)
+			tween_obstacle_transparency(
+				instance,
+				1,
+				cartGameplayConfig.rollingBarrelFadeDuration,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			)
+			task.delay(cartGameplayConfig.rollingBarrelFadeDuration + 0.05, function()
+				if instance.Parent then
+					instance:Destroy()
+				end
+			end)
+			continue
+		end
+
+		local dropProgress = math.clamp(elapsed / cartGameplayConfig.rollingBarrelDropDuration, 0, 1)
+		local easedDropProgress = 1 - (1 - dropProgress) ^ 3
+		local position = if dropProgress < 1
+			then dropPosition:Lerp(targetPosition, easedDropProgress)
+			else targetPosition
+				+ downhillDirection * (elapsed - cartGameplayConfig.rollingBarrelDropDuration) * rollSpeed
+		local spinAngle = elapsed * spinSpeed
+		local boundsCFrame = CFrame.lookAt(
+			position,
+			position + downhillDirection,
+			surfaceNormal
+		) * CFrame.Angles(spinAngle, 0, 0)
+		instance:PivotTo(boundsCFrame * boundsFromPivot:Inverse())
+	end
+end
+
 local function animate_model_despawn(model: Model): ()
 	local scaleValue = Instance.new("NumberValue")
 	scaleValue.Value = model:GetScale()
@@ -753,6 +1002,7 @@ end
 local function despawn_obstacle_wave(wave: Folder): ()
 	for _, obstacle in wave:GetChildren() do
 		if is_obstacle_instance(obstacle) then
+			obstacle:SetAttribute(cartGameplayConfig.rollingBarrelAttribute, false)
 			obstacle:SetAttribute(OBSTACLE_DESPAWNING_ATTRIBUTE, true)
 			set_obstacle_interaction(obstacle, false, false, false)
 			disconnect_obstacle(obstacle)
@@ -834,21 +1084,32 @@ local function create_obstacle(
 	spawnCFrame: CFrame,
 	worldId: number,
 	waveId: number,
-	obstacleScale: number
+	obstacleScale: number,
+	damage: number,
+	isRollingBarrel: boolean
 ): ()
 	local obstacle = template:Clone()
 	if not is_obstacle_instance(obstacle) then
 		return
 	end
-
 	remove_obstacle_scripts(obstacle)
 	obstacle.Name = ("Obstacle_%s"):format(template.Name)
+	local obstacleName = string.lower(obstacle.Name)
+	local shouldRoll = isRollingBarrel
+		or (obstacle:IsA("Model") and string.find(obstacleName, "barrel", 1, true) ~= nil)
 	obstacle:SetAttribute(GENERATED_WORLD_ATTRIBUTE, worldId)
 	obstacle:SetAttribute(WAVE_ID_ATTRIBUTE, waveId)
 	obstacle:SetAttribute(OBSTACLE_SCALE_ATTRIBUTE, obstacleScale)
+	obstacle:SetAttribute(OBSTACLE_DAMAGE_ATTRIBUTE, damage)
+	obstacle:SetAttribute(cartGameplayConfig.rollingBarrelAttribute, false)
 	obstacle.Parent = wave
 	register_obstacle(obstacle)
 	animate_obstacle_spawn(obstacle, spawnCFrame, obstacleScale)
+	if shouldRoll and obstacle:IsA("Model") then
+		task.delay(WAVE_SPAWN_DURATION + 0.05, function()
+			start_rolling_barrel(obstacle, spawnCFrame, obstacleScale)
+		end)
+	end
 end
 
 local function is_spawn_near_active_rider(worldId: number, pendingSpawn: PendingObstacleSpawn): boolean
@@ -902,7 +1163,9 @@ local function spawn_pending_obstacles_for_world(worldId: number): ()
 				pendingSpawn.spawnCFrame,
 				worldId,
 				pendingSpawn.waveId,
-				pendingSpawn.obstacleScale
+				pendingSpawn.obstacleScale,
+				pendingSpawn.damage,
+				pendingSpawn.isRollingBarrel
 			)
 			spawnedCount += 1
 		else
@@ -937,7 +1200,14 @@ local function create_coin(
 	spawnCFrame: CFrame,
 	targetSize: Vector3,
 	worldId: number,
-	waveId: number
+	waveId: number,
+	rewardValue: number,
+	flowReward: number,
+	isRiskCoin: boolean,
+	chainId: string,
+	chainOrder: number,
+	chainLength: number,
+	chainBonus: number
 ): ()
 	local coin = template:Clone()
 	local thumbnailCamera = coin:FindFirstChildWhichIsA("Camera", true)
@@ -953,6 +1223,19 @@ local function create_coin(
 	coin:SetAttribute(WAVE_ID_ATTRIBUTE, waveId)
 	coin:SetAttribute(COIN_SURFACE_RIGHT_ATTRIBUTE, spawnCFrame.RightVector)
 	coin:SetAttribute(COIN_SURFACE_UP_ATTRIBUTE, spawnCFrame.UpVector)
+	coin:SetAttribute(COIN_REWARD_ATTRIBUTE, rewardValue)
+	coin:SetAttribute(COIN_FLOW_REWARD_ATTRIBUTE, flowReward)
+	coin:SetAttribute(COIN_RISK_ATTRIBUTE, isRiskCoin)
+	coin:SetAttribute(COIN_CHAIN_ID_ATTRIBUTE, chainId)
+	coin:SetAttribute(COIN_CHAIN_ORDER_ATTRIBUTE, chainOrder)
+	coin:SetAttribute(COIN_CHAIN_LENGTH_ATTRIBUTE, chainLength)
+	coin:SetAttribute(COIN_CHAIN_BONUS_ATTRIBUTE, chainBonus)
+	if rewardValue >= COIN_GOLD_REWARD then
+		coin.Color = Color3.fromRGB(255, 226, 76)
+		coin.Material = Enum.Material.Neon
+	elseif isRiskCoin then
+		coin.Color = Color3.fromRGB(255, 151, 54)
+	end
 	coin.Parent = wave
 	local targetCFrame = spawnCFrame * CFrame.Angles(COIN_UPRIGHT_ANGLE, 0, 0)
 	local collectionHitbox = create_coin_collection_hitbox(coin, targetCFrame, targetSize)
@@ -970,12 +1253,16 @@ local function create_coin(
 	end)
 end
 
-local function choose_safe_lane_index(random: Random, previousSafeLaneIndex: number?): number
+local function choose_safe_lane_index(
+	random: Random,
+	previousSafeLaneIndex: number?,
+	difficultyProgress: number
+): number
 	if not previousSafeLaneIndex then
 		return random:NextInteger(1, #LANE_MULTIPLIERS)
 	end
 
-	local minimumLaneChange = if random:NextNumber() < 0.65 then 2 else 1
+	local minimumLaneChange = if difficultyProgress >= 0.45 and random:NextNumber() < 0.72 then 2 else 1
 	local candidates: {number} = {}
 	for laneIndex = 1, #LANE_MULTIPLIERS do
 		if math.abs(laneIndex - previousSafeLaneIndex) >= minimumLaneChange then
@@ -989,25 +1276,262 @@ local function choose_safe_lane_index(random: Random, previousSafeLaneIndex: num
 	return candidates[random:NextInteger(1, #candidates)]
 end
 
-local function get_blocked_lane_indices(
-	random: Random,
-	safeLaneIndex: number,
-	previousSafeLaneIndex: number?
-): {number}
-	local targetCount = random:NextInteger(MINIMUM_OBSTACLES_PER_SEGMENT, MAXIMUM_OBSTACLES_PER_SEGMENT)
-	local blockedLaneIndices: {number} = {}
-	if previousSafeLaneIndex and previousSafeLaneIndex ~= safeLaneIndex then
-		table.insert(blockedLaneIndices, previousSafeLaneIndex)
-	end
-
-	while #blockedLaneIndices < targetCount do
-		local candidateLaneIndex = random:NextInteger(1, #LANE_MULTIPLIERS)
-		if candidateLaneIndex ~= safeLaneIndex and not table.find(blockedLaneIndices, candidateLaneIndex) then
-			table.insert(blockedLaneIndices, candidateLaneIndex)
+local function choose_reward_lane_index(random: Random, safeLaneIndex: number): number
+	local maximumDistance = 0
+	local candidates: {number} = {}
+	for laneIndex = 1, #LANE_MULTIPLIERS do
+		local laneDistance = math.abs(laneIndex - safeLaneIndex)
+		if laneDistance > maximumDistance then
+			maximumDistance = laneDistance
+			table.clear(candidates)
+			table.insert(candidates, laneIndex)
+		elseif laneDistance == maximumDistance then
+			table.insert(candidates, laneIndex)
 		end
 	end
 
-	return blockedLaneIndices
+	return candidates[random:NextInteger(1, #candidates)]
+end
+
+local function choose_pattern_name(
+	random: Random,
+	encounterIndex: number,
+	encounterCount: number,
+	previousPatternName: string?,
+	lastJumpGateIndex: number
+): string
+	if encounterIndex == 1 then
+		return PATTERN_SLALOM
+	end
+	if encounterIndex % 6 == 0 then
+		return PATTERN_BREATHER
+	end
+
+	local difficultyProgress = (encounterIndex - 1) / math.max(encounterCount - 1, 1)
+	local candidates = {
+		{name = PATTERN_SLALOM, weight = 3.2},
+		{name = PATTERN_FORK, weight = 2.6},
+	}
+	if difficultyProgress >= 0.28 then
+		table.insert(candidates, {name = PATTERN_CHICANE, weight = 1.8 + difficultyProgress * 2.2})
+	end
+	if difficultyProgress >= 0.14 and encounterIndex - lastJumpGateIndex >= 3 then
+		table.insert(candidates, {name = PATTERN_JUMP_GATE, weight = 1.5 + difficultyProgress})
+	end
+
+	local totalWeight = 0
+	for _, candidate in candidates do
+		local repetitionMultiplier = if candidate.name == previousPatternName then 0.28 else 1
+		candidate.weight *= repetitionMultiplier
+		totalWeight += candidate.weight
+	end
+
+	local selection = random:NextNumber(0, totalWeight)
+	local accumulatedWeight = 0
+	for _, candidate in candidates do
+		accumulatedWeight += candidate.weight
+		if selection <= accumulatedWeight then
+			return candidate.name
+		end
+	end
+
+	return PATTERN_SLALOM
+end
+
+local function get_pattern_rows(
+	patternName: string,
+	entryLaneIndex: number,
+	safeLaneIndex: number,
+	rewardLaneIndex: number
+): {PatternRow}
+	local middleLaneIndex = math.clamp(math.round((entryLaneIndex + safeLaneIndex) * 0.5), 1, #LANE_MULTIPLIERS)
+	if patternName == PATTERN_FORK then
+		return {
+			{
+				distanceAlpha = 0.4,
+				openLaneIndices = {safeLaneIndex, rewardLaneIndex},
+				scaleMinimum = 1.05,
+				scaleMaximum = 1.48,
+			},
+			{
+				distanceAlpha = 0.76,
+				openLaneIndices = {safeLaneIndex, rewardLaneIndex},
+				scaleMinimum = 1.12,
+				scaleMaximum = 1.58,
+			},
+		}
+	end
+	if patternName == PATTERN_CHICANE then
+		return {
+			{
+				distanceAlpha = 0.2,
+				openLaneIndices = {entryLaneIndex},
+				scaleMinimum = 1.15,
+				scaleMaximum = MAXIMUM_OBSTACLE_SCALE,
+			},
+			{
+				distanceAlpha = 0.5,
+				openLaneIndices = {middleLaneIndex},
+				scaleMinimum = 1.18,
+				scaleMaximum = MAXIMUM_OBSTACLE_SCALE,
+			},
+			{
+				distanceAlpha = 0.82,
+				openLaneIndices = {safeLaneIndex},
+				scaleMinimum = 1.2,
+				scaleMaximum = MAXIMUM_OBSTACLE_SCALE,
+			},
+		}
+	end
+	if patternName == PATTERN_JUMP_GATE then
+		return {
+			{
+				distanceAlpha = 0.58,
+				openLaneIndices = {},
+				scaleMinimum = MINIMUM_OBSTACLE_SCALE,
+				scaleMaximum = SOFT_OBSTACLE_MAXIMUM_SCALE,
+				damageOverride = DEFAULT_OBSTACLE_DAMAGE,
+			},
+		}
+	end
+	if patternName == PATTERN_BREATHER then
+		return {}
+	end
+
+	return {
+		{
+			distanceAlpha = 0.28,
+			openLaneIndices = {entryLaneIndex, middleLaneIndex},
+			scaleMinimum = 0.96,
+			scaleMaximum = 1.36,
+		},
+		{
+			distanceAlpha = 0.74,
+			openLaneIndices = {middleLaneIndex, safeLaneIndex},
+			scaleMinimum = 1.02,
+			scaleMaximum = 1.48,
+		},
+	}
+end
+
+local function get_obstacle_damage(template: Instance, obstacleScale: number, damageOverride: number?): number
+	if damageOverride ~= nil then
+		return math.max(damageOverride, DEFAULT_OBSTACLE_DAMAGE)
+	end
+
+	local configuredDamage = get_nonnegative_integer_attribute(template, OBSTACLE_DAMAGE_ATTRIBUTE)
+	if configuredDamage then
+		return math.max(configuredDamage, DEFAULT_OBSTACLE_DAMAGE)
+	end
+	if obstacleScale >= cartGameplayConfig.obstacleCriticalScale then
+		return cartGameplayConfig.obstacleCriticalDamage
+	end
+	if obstacleScale >= HEAVY_OBSTACLE_MINIMUM_SCALE then
+		return 2
+	end
+
+	return DEFAULT_OBSTACLE_DAMAGE
+end
+
+local function queue_pattern_row(
+	pendingSpawns: {PendingObstacleSpawn},
+	rampPart: BasePart,
+	templates: {Instance},
+	random: Random,
+	waveId: number,
+	startDistance: number,
+	encounterLength: number,
+	lateralRange: number,
+	patternName: string,
+	patternRow: PatternRow,
+	generatedCount: number
+): number
+	local maximumLongitudinalJitter = encounterLength * OBSTACLE_LONGITUDINAL_JITTER_MULTIPLIER
+	local maximumLateralJitter = lateralRange * OBSTACLE_LATERAL_JITTER_MULTIPLIER
+	local laneSpacing = math.abs(LANE_MULTIPLIERS[2] - LANE_MULTIPLIERS[1]) * lateralRange
+	local clusterCount = if patternName == PATTERN_JUMP_GATE then JUMP_GATE_CLUSTER_COUNT else OBSTACLE_CLUSTER_COUNT
+	local clusterSpacing = if patternName == PATTERN_JUMP_GATE
+		then laneSpacing / JUMP_GATE_CLUSTER_COUNT
+		else laneSpacing * OBSTACLE_CLUSTER_SPACING_MULTIPLIER
+	local rowDistance = startDistance + encounterLength * patternRow.distanceAlpha
+	local rollingBarrelTemplate: Instance?
+	for _, candidate in templates do
+		local candidateName = string.lower(candidate.Name)
+		if candidate:IsA("Model")
+			and (string.find(candidateName, "barrel", 1, true) ~= nil
+				or string.find(candidateName, "barril", 1, true) ~= nil)
+		then
+			rollingBarrelTemplate = candidate
+			break
+		end
+	end
+	for laneIndex = 1, #LANE_MULTIPLIERS do
+		if generatedCount >= MAX_OBSTACLES_PER_WAVE or table.find(patternRow.openLaneIndices, laneIndex) then
+			continue
+		end
+
+		for clusterIndex = 1, clusterCount do
+			if generatedCount >= MAX_OBSTACLES_PER_WAVE then
+				break
+			end
+
+			local template = if patternName == PATTERN_JUMP_GATE
+				then select_jump_gate_template(random, templates)
+				else select_template(random, templates, clusterIndex == 1)
+			if not template then
+				continue
+			end
+
+			local templateName = string.lower(template.Name)
+			local isRollingBarrel = template:IsA("Model")
+				and (string.find(templateName, "barrel", 1, true) ~= nil
+					or string.find(templateName, "barril", 1, true) ~= nil)
+			if patternName ~= PATTERN_JUMP_GATE
+				and patternName ~= PATTERN_BREATHER
+				and random:NextNumber() < cartGameplayConfig.rollingBarrelChance
+			then
+				if rollingBarrelTemplate then
+					template = rollingBarrelTemplate
+					isRollingBarrel = true
+				end
+			end
+
+			local clusterOffset = (clusterIndex - (clusterCount + 1) * 0.5) * clusterSpacing
+			local lateralJitter = if patternName == PATTERN_JUMP_GATE
+				then 0
+				else random:NextNumber(-maximumLateralJitter, maximumLateralJitter)
+			local lateralOffset = math.clamp(
+				LANE_MULTIPLIERS[laneIndex] * lateralRange + clusterOffset + lateralJitter,
+				-lateralRange,
+				lateralRange
+			)
+			local distanceJitter = if patternName == PATTERN_JUMP_GATE
+				then 0
+				else random:NextNumber(-maximumLongitudinalJitter, maximumLongitudinalJitter)
+			local localY = rampPart.Size.Y * 0.5 - rowDistance - distanceJitter
+			local _, templateSize = get_instance_bounds(template)
+			local obstacleScale = random:NextNumber(patternRow.scaleMinimum, patternRow.scaleMaximum)
+			local spawnCFrame = get_surface_cframe(
+				rampPart,
+				localY,
+				lateralOffset,
+				templateSize.Y * obstacleScale * 0.5 + SURFACE_CLEARANCE
+			)
+			if spawnCFrame then
+				table.insert(pendingSpawns, {
+					template = template,
+					spawnCFrame = spawnCFrame,
+					waveId = waveId,
+					obstacleScale = obstacleScale,
+					damage = get_obstacle_damage(template, obstacleScale, patternRow.damageOverride),
+					isRollingBarrel = isRollingBarrel and template:IsA("Model"),
+				})
+				generatedCount += 1
+			end
+		end
+	end
+
+	return generatedCount
 end
 
 local function generate_obstacles_for_ramp(
@@ -1033,92 +1557,141 @@ local function generate_obstacles_for_ramp(
 		return {}, generatedCount, previousSafeLaneIndex
 	end
 
-	local segmentCount = math.clamp(
-		math.floor(usableLength / TARGET_OBSTACLE_SEGMENT_LENGTH),
-		MINIMUM_OBSTACLE_SEGMENTS_PER_RAMP_PART,
-		MAXIMUM_OBSTACLE_SEGMENTS_PER_RAMP_PART
+	local encounterCount = math.clamp(
+		math.floor(usableLength / TARGET_ENCOUNTER_LENGTH),
+		MINIMUM_ENCOUNTERS_PER_RAMP_PART,
+		MAXIMUM_ENCOUNTERS_PER_RAMP_PART
 	)
-	local segmentLength = usableLength / segmentCount
+	local encounterLength = usableLength / encounterCount
 	local segmentLayouts: {SegmentLayout} = {}
 	local lastSafeLaneIndex = previousSafeLaneIndex
+	local previousPatternName: string? = nil
+	local lastJumpGateIndex = -math.huge
 
-	for segmentIndex = 1, segmentCount do
-		local startDistance = safeStart + (segmentIndex - 1) * segmentLength
-		local endDistance = startDistance + segmentLength
-		local centerDistance = startDistance + segmentLength * 0.5
-		local safeLaneIndex = choose_safe_lane_index(random, lastSafeLaneIndex)
+	for encounterIndex = 1, encounterCount do
+		local startDistance = safeStart + (encounterIndex - 1) * encounterLength
+		local endDistance = startDistance + encounterLength
+		local difficultyProgress = (encounterIndex - 1) / math.max(encounterCount - 1, 1)
+		local entryLaneIndex = lastSafeLaneIndex or random:NextInteger(1, #LANE_MULTIPLIERS)
+		local safeLaneIndex = choose_safe_lane_index(random, lastSafeLaneIndex, difficultyProgress)
+		local rewardLaneIndex = choose_reward_lane_index(random, safeLaneIndex)
+		local patternName = choose_pattern_name(
+			random,
+			encounterIndex,
+			encounterCount,
+			previousPatternName,
+			lastJumpGateIndex
+		)
+		if patternName == PATTERN_JUMP_GATE then
+			lastJumpGateIndex = encounterIndex
+		end
 		table.insert(segmentLayouts, {
 			rampPart = rampPart,
 			startDistance = startDistance,
 			endDistance = endDistance,
 			lateralRange = lateralRange,
+			entryLaneIndex = entryLaneIndex,
 			safeLaneIndex = safeLaneIndex,
+			rewardLaneIndex = rewardLaneIndex,
+			patternName = patternName,
 		})
 
 		if generatedCount < MAX_OBSTACLES_PER_WAVE then
-			local rowSpacing = segmentLength / OBSTACLE_ROWS_PER_SEGMENT
-			local maximumLongitudinalJitter = rowSpacing * OBSTACLE_LONGITUDINAL_JITTER_MULTIPLIER
-			local maximumLateralJitter = lateralRange * OBSTACLE_LATERAL_JITTER_MULTIPLIER
-			for rowIndex = 1, OBSTACLE_ROWS_PER_SEGMENT do
-				local rowCenterDistance = startDistance + (rowIndex - 0.5) * rowSpacing
-				local blockedLaneIndices = get_blocked_lane_indices(random, safeLaneIndex, lastSafeLaneIndex)
-				for obstacleIndex, laneIndex in blockedLaneIndices do
-					if generatedCount >= MAX_OBSTACLES_PER_WAVE then
-						break
-					end
-
-					local template = select_template(random, templates, obstacleIndex == 1)
-					if template then
-						local lateralOffset = math.clamp(
-							LANE_MULTIPLIERS[laneIndex] * lateralRange
-								+ random:NextNumber(-maximumLateralJitter, maximumLateralJitter),
-							-lateralRange,
-							lateralRange
-						)
-						local rowDistance = rowCenterDistance
-							+ random:NextNumber(-maximumLongitudinalJitter, maximumLongitudinalJitter)
-						local rowLocalY = rampLength * 0.5 - rowDistance
-						local _, templateSize = get_instance_bounds(template)
-						local obstacleScale = random:NextNumber(MINIMUM_OBSTACLE_SCALE, MAXIMUM_OBSTACLE_SCALE)
-						local spawnCFrame = get_surface_cframe(
-							rampPart,
-							rowLocalY,
-							lateralOffset,
-							templateSize.Y * obstacleScale * 0.5 + SURFACE_CLEARANCE
-						)
-						if spawnCFrame then
-							table.insert(pendingSpawns, {
-								template = template,
-								spawnCFrame = spawnCFrame,
-								waveId = waveId,
-								obstacleScale = obstacleScale,
-							})
-							generatedCount += 1
-						end
-					end
-				end
+			for _, patternRow in get_pattern_rows(patternName, entryLaneIndex, safeLaneIndex, rewardLaneIndex) do
+				generatedCount = queue_pattern_row(
+					pendingSpawns,
+					rampPart,
+					templates,
+					random,
+					waveId,
+					startDistance,
+					encounterLength,
+					lateralRange,
+					patternName,
+					patternRow,
+					generatedCount
+				)
 			end
 		end
 
 		lastSafeLaneIndex = safeLaneIndex
+		previousPatternName = patternName
 	end
 
 	return segmentLayouts, generatedCount, lastSafeLaneIndex
 end
 
-local function get_safe_lane_offset(segmentLayouts: {SegmentLayout}, distanceFromTop: number): number
-	local selectedLayout: SegmentLayout? = nil
-	for _, segmentLayout in segmentLayouts do
-		selectedLayout = segmentLayout
-		if distanceFromTop <= segmentLayout.endDistance then
-			break
+local function create_coin_chain_for_layout(
+	wave: Folder,
+	coinTemplate: BasePart,
+	segmentLayout: SegmentLayout,
+	random: Random,
+	worldId: number,
+	waveId: number,
+	encounterIndex: number
+): ()
+	local isJumpChain = segmentLayout.patternName == PATTERN_JUMP_GATE
+	local isRiskChain = segmentLayout.patternName ~= PATTERN_BREATHER
+	local coinCount = random:NextInteger(MINIMUM_COINS_PER_CHAIN, MAXIMUM_COINS_PER_CHAIN)
+	local coinScale = random:NextNumber(COIN_MINIMUM_SCALE, COIN_MAXIMUM_SCALE)
+	local startDistance = segmentLayout.startDistance + COIN_CHAIN_START_PADDING
+	local endDistance = segmentLayout.endDistance - COIN_CHAIN_START_PADDING
+	local curveOffset = if isJumpChain then 0 else random:NextNumber(-COIN_MAX_CURVE_OFFSET, COIN_MAX_CURVE_OFFSET) * 0.35
+	local chainBonus = if isJumpChain
+		then COIN_JUMP_CHAIN_BONUS
+		elseif isRiskChain then COIN_RISK_CHAIN_BONUS
+		else COIN_SAFE_CHAIN_BONUS
+	local chainId = ("%d:%d:%s"):format(waveId, encounterIndex, segmentLayout.rampPart:GetFullName())
+	local targetLaneIndex = if isRiskChain then segmentLayout.rewardLaneIndex else segmentLayout.safeLaneIndex
+	local targetLaneOffset = LANE_MULTIPLIERS[targetLaneIndex] * segmentLayout.lateralRange
+	local entryLaneOffset = LANE_MULTIPLIERS[segmentLayout.entryLaneIndex] * segmentLayout.lateralRange
+	local hasGoldEnd = isJumpChain or (isRiskChain and random:NextNumber() < 0.3)
+
+	for chainOrder = 1, coinCount do
+		local progress = if coinCount > 1 then (chainOrder - 1) / (coinCount - 1) else 0
+		local smoothProgress = progress * progress * (3 - 2 * progress)
+		local distanceFromTop = startDistance + (endDistance - startDistance) * progress
+		local baseLateralOffset = entryLaneOffset + (targetLaneOffset - entryLaneOffset) * smoothProgress
+		local lateralOffset = math.clamp(
+			baseLateralOffset + math.sin(progress * math.pi) * curveOffset,
+			-segmentLayout.lateralRange,
+			segmentLayout.lateralRange
+		)
+		local targetSize = coinTemplate.Size * coinScale
+		local standingHeight = math.max(targetSize.X, targetSize.Z)
+		local verticalArcOffset = if isJumpChain then math.sin(progress * math.pi) * JUMP_COIN_ARC_HEIGHT else 0
+		local localY = segmentLayout.rampPart.Size.Y * 0.5 - distanceFromTop
+		local spawnCFrame = get_surface_cframe(
+			segmentLayout.rampPart,
+			localY,
+			lateralOffset,
+			standingHeight * 0.5 + COIN_SURFACE_CLEARANCE + verticalArcOffset
+		)
+		if spawnCFrame then
+			local rewardValue = if hasGoldEnd and chainOrder == coinCount
+				then COIN_GOLD_REWARD
+				elseif isRiskChain then COIN_RISK_REWARD
+				else COIN_SAFE_REWARD
+			local flowReward = if isRiskChain
+				then cartGameplayConfig.flowRiskCoinReward
+				else cartGameplayConfig.flowCoinReward
+			create_coin(
+				wave,
+				coinTemplate,
+				spawnCFrame,
+				targetSize,
+				worldId,
+				waveId,
+				rewardValue,
+				flowReward,
+				isRiskChain,
+				chainId,
+				chainOrder,
+				coinCount,
+				chainBonus
+			)
 		end
 	end
-	if not selectedLayout then
-		return 0
-	end
-
-	return LANE_MULTIPLIERS[selectedLayout.safeLaneIndex] * selectedLayout.lateralRange
 end
 
 local function generate_coin_chains_for_ramp(
@@ -1129,51 +1702,20 @@ local function generate_coin_chains_for_ramp(
 	worldId: number,
 	waveId: number
 ): ()
-	if #segmentLayouts == 0 then
-		return
-	end
-
-	local finalDistance = segmentLayouts[#segmentLayouts].endDistance
-	for _ = 1, COIN_CHAINS_PER_RAMP_PART do
-		local startSegment = segmentLayouts[random:NextInteger(1, #segmentLayouts)]
-		local startMinimum = startSegment.startDistance + COIN_CHAIN_START_PADDING
-		local startMaximum = math.max(startMinimum, startSegment.endDistance - COIN_CHAIN_START_PADDING)
-		local startDistance = random:NextNumber(startMinimum, startMaximum)
-		local maximumCoinCount = math.min(
-			MAXIMUM_COINS_PER_CHAIN,
-			math.floor((finalDistance - startDistance) / COIN_SPACING) + 1
-		)
-		if maximumCoinCount < MINIMUM_COINS_PER_CHAIN then
-			continue
-		end
-
-		local coinCount = random:NextInteger(MINIMUM_COINS_PER_CHAIN, maximumCoinCount)
-		local coinScale = random:NextNumber(COIN_MINIMUM_SCALE, COIN_MAXIMUM_SCALE)
-		local curveOffset = random:NextNumber(-COIN_MAX_CURVE_OFFSET, COIN_MAX_CURVE_OFFSET)
-		local currentLateralOffset = get_safe_lane_offset(segmentLayouts, startDistance)
-
-		for coinIndex = 0, coinCount - 1 do
-			local distanceFromTop = startDistance + coinIndex * COIN_SPACING
-			local targetLateralOffset = get_safe_lane_offset(segmentLayouts, distanceFromTop)
-			if coinIndex > 0 then
-				currentLateralOffset += (targetLateralOffset - currentLateralOffset) * COIN_LANE_FOLLOW_ALPHA
-			end
-
-			local progress = if coinCount > 1 then coinIndex / (coinCount - 1) else 0
-			local curvedLateralOffset = currentLateralOffset + math.sin(progress * math.pi) * curveOffset
-			local rampPart = startSegment.rampPart
-			local localY = rampPart.Size.Y * 0.5 - distanceFromTop
-			local targetSize = coinTemplate.Size * coinScale
-			local standingHeight = math.max(targetSize.X, targetSize.Z)
-			local spawnCFrame = get_surface_cframe(
-				rampPart,
-				localY,
-				curvedLateralOffset,
-				standingHeight * 0.5 + COIN_SURFACE_CLEARANCE
+	for encounterIndex, segmentLayout in segmentLayouts do
+		local shouldCreateChain = segmentLayout.patternName == PATTERN_JUMP_GATE
+			or segmentLayout.patternName == PATTERN_BREATHER
+			or encounterIndex % COIN_CHAIN_SEGMENT_INTERVAL == 0
+		if shouldCreateChain then
+			create_coin_chain_for_layout(
+				wave,
+				coinTemplate,
+				segmentLayout,
+				random,
+				worldId,
+				waveId,
+				encounterIndex
 			)
-			if spawnCFrame then
-				create_coin(wave, coinTemplate, spawnCFrame, targetSize, worldId, waveId)
-			end
 		end
 	end
 end
@@ -1368,5 +1910,9 @@ charactersFolder.ChildAdded:Connect(function(character: Instance)
 	end
 end)
 workspace.DescendantAdded:Connect(on_workspace_descendant_added)
-Players.PlayerRemoving:Connect(flush_pending_coin_rewards)
+Players.PlayerRemoving:Connect(function(player: Player)
+	coinChainStateByPlayer[player] = nil
+	flush_pending_coin_rewards(player)
+end)
 RunService.Heartbeat:Connect(update_pending_obstacle_spawns)
+RunService.Heartbeat:Connect(update_rolling_barrels)

@@ -1,5 +1,6 @@
 ------------------//SERVICES
 local Players: Players = game:GetService("Players")
+local Lighting: Lighting = game:GetService("Lighting")
 local ReplicatedStorage: ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService: RunService = game:GetService("RunService")
 
@@ -7,13 +8,24 @@ local RunService: RunService = game:GetService("RunService")
 local EQUIPPED_CART_ATTRIBUTE: string = "EquippedCart"
 local IS_RAMP_SLIDING_ATTRIBUTE: string = "IsRampSliding"
 local RAMP_MODE_STATE_ATTRIBUTE: string = "RampModeState"
+local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
 local MAX_SPEED_ATTRIBUTE: string = "MaxSpeed"
 local DEFAULT_CART_NAME: string = "Default"
 local SLIDE_STATE: string = "Slide"
 local DEFAULT_SPEED_REFERENCE: number = 45
-local MIN_SPEED_TO_INCREASE_FOV: number = 2
-local MAX_SPEED_FOV_BOOST: number = 12
-local FOV_SMOOTHING_SPEED: number = 9
+local MIN_SPEED_TO_INCREASE_FOV: number = 8
+local MAX_SPEED_FOV_BOOST: number = 16
+local OVERDRIVE_FOV_BOOST: number = 6
+local FOV_SMOOTHING_SPEED: number = 11
+local MAX_CAMERA_ROLL: number = 9
+local CAMERA_ROLL_MULTIPLIER: number = 0.38
+local CAMERA_VIBRATION_START_PROGRESS: number = 0.48
+local CAMERA_VIBRATION_MAXIMUM_OFFSET: number = 0.055
+local CAMERA_VIBRATION_MAXIMUM_ROLL: number = 0.28
+local CAMERA_VIBRATION_FREQUENCY: number = 9
+local MAX_SPEED_BLUR: number = 2.4
+local OVERDRIVE_BLUR_BOOST: number = 1.8
+local BLUR_EFFECT_NAME: string = "CartSpeedBlur"
 local GROUND_CHECK_DISTANCE: number = 10
 local MIN_SURFACE_DIRECTION_MAGNITUDE: number = 0.01
 local SPEED_FOV_EFFECT_NAME: string = "Speed"
@@ -44,6 +56,7 @@ local activeCamera: Camera?
 local activeCameraEffects: CameraEffectStack?
 local activeSpeedReference: number = DEFAULT_SPEED_REFERENCE
 local cameraDebugElapsed: number = 0
+local speedBlur: BlurEffect?
 local groundRaycastParams = RaycastParams.new()
 groundRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -127,7 +140,43 @@ local function get_speed_fov_offset(): number
 		1
 	)
 	local smoothProgress = speedProgress * speedProgress * (3 - 2 * speedProgress)
-	return smoothProgress * MAX_SPEED_FOV_BOOST
+	local character = localPlayer.Character
+	local isOverdriveActive = character and character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true
+	local overdriveBoost = if isOverdriveActive
+		then OVERDRIVE_FOV_BOOST + math.sin(os.clock() * 10) * 0.7
+		else 0
+	return smoothProgress * MAX_SPEED_FOV_BOOST + overdriveBoost
+end
+
+local function get_speed_progress(): number
+	local rootPart = get_cart_root_part()
+	if not rootPart then
+		return 0
+	end
+
+	local speedRange = math.max(activeSpeedReference - MIN_SPEED_TO_INCREASE_FOV, 1)
+	return math.clamp(
+		(rootPart.AssemblyLinearVelocity.Magnitude - MIN_SPEED_TO_INCREASE_FOV) / speedRange,
+		0,
+		1
+	)
+end
+
+local function ensure_speed_blur(): BlurEffect
+	if speedBlur and speedBlur.Parent then
+		return speedBlur
+	end
+
+	local existingBlur = Lighting:FindFirstChild(BLUR_EFFECT_NAME)
+	if existingBlur then
+		existingBlur:Destroy()
+	end
+	local newBlur = Instance.new("BlurEffect")
+	newBlur.Name = BLUR_EFFECT_NAME
+	newBlur.Size = 0
+	newBlur.Parent = Lighting
+	speedBlur = newBlur
+	return newBlur
 end
 
 local function project_onto_plane(vector: Vector3, normal: Vector3): Vector3
@@ -172,7 +221,44 @@ local function get_camera_roll_offset(): number
 	surfaceUpDirection = surfaceUpDirection.Unit
 	local sine = surfaceUpDirection:Cross(cartUpDirection):Dot(forwardDirection)
 	local cosine = math.clamp(surfaceUpDirection:Dot(cartUpDirection), -1, 1)
-	return math.deg(math.atan2(-sine, cosine))
+	local cartRoll = math.deg(math.atan2(-sine, cosine)) * CAMERA_ROLL_MULTIPLIER
+	return math.clamp(cartRoll, -MAX_CAMERA_ROLL, MAX_CAMERA_ROLL)
+end
+
+local function update_speed_blur(speedProgress: number, isOverdriveActive: boolean, deltaTime: number): ()
+	local blur = ensure_speed_blur()
+	local targetSize = speedProgress * speedProgress * MAX_SPEED_BLUR
+		+ (if isOverdriveActive then OVERDRIVE_BLUR_BOOST else 0)
+	local smoothingAlpha = 1 - math.exp(-8 * deltaTime)
+	blur.Size += (targetSize - blur.Size) * smoothingAlpha
+end
+
+local function apply_camera_vibration(speedProgress: number, isOverdriveActive: boolean): ()
+	local currentCamera = activeCamera
+	if not currentCamera then
+		return
+	end
+
+	local vibrationProgress = math.clamp(
+		(speedProgress - CAMERA_VIBRATION_START_PROGRESS) / (1 - CAMERA_VIBRATION_START_PROGRESS),
+		0,
+		1
+	)
+	if isOverdriveActive then
+		vibrationProgress = 1
+	end
+	if vibrationProgress <= 0 then
+		return
+	end
+
+	local currentTime = os.clock() * CAMERA_VIBRATION_FREQUENCY
+	local offsetScale = CAMERA_VIBRATION_MAXIMUM_OFFSET * vibrationProgress
+	local rollScale = CAMERA_VIBRATION_MAXIMUM_ROLL * vibrationProgress
+	local horizontalOffset = math.noise(currentTime, 0, 0) * offsetScale
+	local verticalOffset = math.noise(0, currentTime, 0) * offsetScale
+	local rollOffset = math.noise(0, 0, currentTime) * rollScale
+	currentCamera.CFrame *= CFrame.new(horizontalOffset, verticalOffset, 0)
+		* CFrame.Angles(0, 0, math.rad(rollOffset))
 end
 
 local function get_cart_speed(): number
@@ -224,10 +310,15 @@ local function update_camera_effects(deltaTime: number): ()
 	end
 
 	local speedFovOffset = get_speed_fov_offset()
+	local speedProgress = get_speed_progress()
+	local character = localPlayer.Character
+	local isOverdriveActive = character and character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true
 	local rollOffset = get_camera_roll_offset()
 	cameraEffects:set_effect(SPEED_FOV_EFFECT_NAME, speedFovOffset)
 	cameraEffects:set_roll(TURN_CAMERA_EFFECT_NAME, rollOffset)
 	cameraEffects:step(deltaTime)
+	update_speed_blur(speedProgress, isOverdriveActive == true, deltaTime)
+	apply_camera_vibration(speedProgress, isOverdriveActive == true)
 	update_camera_debug(deltaTime, cameraEffects, speedFovOffset, rollOffset)
 end
 
@@ -240,6 +331,10 @@ local function cleanup(): ()
 	end
 	activeCamera = nil
 	cameraDebugElapsed = 0
+	if speedBlur then
+		speedBlur:Destroy()
+		speedBlur = nil
+	end
 end
 
 ------------------//INIT

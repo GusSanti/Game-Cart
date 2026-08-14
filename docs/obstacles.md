@@ -1,11 +1,21 @@
 # Obstaculos e overdrive
 
-`ReplicatedStorage.Assets.Obstacles` aceita qualquer `BasePart` ou `Model` como template: blocos, arvores, cactos, caixas, rampas, rochas e outros formatos. `Damage` e `SpawnWeight` sao atributos opcionais; sem `Damage`, o obstaculo causa um ponto de dano. Scripts incluidos em assets importados nao sao copiados para os obstaculos gerados.
+`ReplicatedStorage.Assets.Obstacles` aceita qualquer `BasePart` ou `Model` como template: blocos, arvores, cactos, caixas, rampas, rochas e outros formatos. `Damage` e `SpawnWeight` sao atributos opcionais; sem `Damage`, o obstaculo causa pelo menos um ponto de dano. Um `Damage` maior continua aumentando o impacto. Scripts incluidos em assets importados nao sao copiados para os obstaculos gerados.
 
-`ObstacleService.server.lua` prepara uma onda procedural para cada mundo que possui rampa. Os obstaculos sao instanciados com Tween apenas quando um carrinho ativo se aproxima da parte correspondente da pista, permanecem estaveis durante uma descida e somente sao substituidos depois que nao ha mais jogadores ativos naquele mundo.
+Todas as peças dos templates devem permanecer ancoradas. O serviço também força `Anchored`, zera velocidades linear e angular e configura colisão, toque e consulta nas cópias geradas antes de ativá-las.
 
-Cada parte da rampa e dividida em segmentos curtos. Cada segmento recebe duas fileiras de duas ou tres faixas bloqueadas e a faixa segura muda de lado, eliminando trechos vazios e formando uma sequencia intensa de desvios. As posicoes recebem variacao lateral e longitudinal para formar uma distribuicao organica, sem uma grade visivel. Cada prop recebe uma escala aleatoria entre 1x e 2x. O mesmo servico cria moedas em `Workspace.GeneratedCollectibles`: seis trilhas por parte, com 8 a 20 moedas, curvas leves e escala variavel. As moedas ficam em pe, maiores e giram no cliente; uma area de coleta invisivel e mais larga acompanha cada moeda para a coleta permanecer confiavel em alta velocidade. A coleta e validada no servidor e credita `Coins` em pequenos lotes.
+`ObstacleService.server.lua` prepara a onda procedural da rampa do `World1`. Os obstáculos são instanciados com Tween apenas quando um carrinho ativo se aproxima da parte correspondente da pista, permanecem estáveis durante uma descida e somente são substituídos depois que não há mais jogadores ativos.
+
+Cada parte da rampa é dividida em encontros de aproximadamente `86` studs. O diretor aumenta a complexidade ao longo da descida e escolhe entre cinco padrões: `Slalom`, `Fork`, `Chicane`, `JumpGate` e `Breather`. Padrões iguais têm peso reduzido quando acabaram de aparecer, barreiras de pulo mantêm pelo menos três encontros de distância e um trecho de respiro aparece periodicamente.
+
+As faixas bloqueadas recebem pequenos grupos de props, evitando os grandes espaços vazios da distribuição anterior. Templates muito complexos têm peso reduzido para preservar desempenho. `JumpGate` utiliza preferencialmente assets baixos e simples e forma uma barreira contínua que deve ser pulada.
+
+O tamanho comunica o impacto: todo obstáculo causa pelo menos um ponto; obstáculos grandes causam dois e os maiores causam três. Um atributo `Damage` definido no template continua tendo prioridade, mas nunca reduz o impacto abaixo de um ponto.
+
+As moedas em `Workspace.GeneratedCollectibles` agora pertencem aos encontros. Trechos de respiro oferecem sequências seguras de valor baixo; slaloms, bifurcações e chicanes posicionam sequências na rota mais exigente; barreiras de pulo criam arcos de moedas. Moedas de risco valem `2`, moedas douradas valem `5` e completar a sequência concede um bônus adicional. A coleta e os bônus são validados no servidor e persistidos em pequenos lotes.
+
+O template `Barrel` é tratado como obstáculo móvel quando aparece na descida. Depois do aviso de spawn, ele cai alguns studs acima da pista, toca o chão e rola na direção da descida com giro contínuo por alguns segundos. A trajetória é cinemática e autoritativa no servidor, mantém colisão e dano por toque e desaparece sozinha para não acumular na onda.
 
 O carrinho usa `MaxCartHealth` como configuracao do asset. Em cada descida, o servidor aplica esse valor nos atributos `CartMaxHealth` e `CartHealth` do personagem-carrinho. Dano, intervalo de invulnerabilidade e eliminacao sao todos validados no servidor.
 
-Depois de oito segundos em `Slide` sem colisao e sem usar Shift, o servidor define `CartOverdriveActive`. O cliente aplica a velocidade adicional e mostra particulas nas rodas. Shift continua sendo a entrada de inclinacao e tambem reinicia a sequencia limpa.
+O Overdrive não depende mais de esperar sem agir. Moedas, sequências completas, inclinações, aterrissagens limpas e o salto inicial alimentam `CartFlow`; colisões zeram o medidor. Ao atingir o máximo, o servidor mantém `CartOverdriveActive` por cinco segundos.
