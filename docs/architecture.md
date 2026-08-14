@@ -31,6 +31,7 @@ flowchart LR
 - `CharacterSetup.server.lua` cria `Workspace.Characters` e aplica o grupo de colisão dos jogadores.
 - `RampService.server.lua` reconhece `JumpArea`, valida o mundo do jogador e controla o ciclo de carga e lançamento.
 - `RampCharacterService.lua` pré-monta e replica o próximo `Character` baseado no carrinho antes da entrada, corrige as juntas do rig e mantém uma cópia privada para restauração.
+- `CodeService.server.lua` valida códigos no servidor, registra resgates únicos e concede moedas usando o `DataUtility`.
 
 ### Cliente
 
@@ -48,4 +49,4 @@ flowchart LR
 
 `PlayerData.server.lua` é o único ponto que inicia sessões de perfil. `DataUtility` cria os remotes de dados no servidor e oferece leitura e observação no cliente. Código cliente nunca grava o perfil diretamente.
 
-`World`, `Coins` e `EquippedCart` são persistidos no perfil e espelhados como atributos do `Player`. O servidor usa `World` para autorizar a entrada na `JumpArea`; o cliente recebe somente o estado de carga ou lançamento já validado.
+`World`, `Coins`, `EquippedCart` e `RedeemedCodes` são persistidos no perfil e `World`, `Coins` e `EquippedCart` são espelhados como atributos do `Player`. O servidor usa `World` para autorizar a entrada na `JumpArea`; o cliente recebe somente o estado de carga ou lançamento já validado.

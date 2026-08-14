@@ -6,54 +6,41 @@ local ServerStorage: ServerStorage = game:GetService("ServerStorage")
 
 ------------------//CONSTANTS
 local STORE_NAME: string = RunService:IsStudio() and "PlayerData_Studio_v1" or "PlayerData_v1"
-local DEFAULT_WORLD: number = 1
-local DEFAULT_COINS: number = 0
-local DEFAULT_EQUIPPED_CART: string = "Default"
 local RUNTIME_DATA_PATHS: {string} = {
 	"World",
 	"Coins",
 	"EquippedCart",
-}
-local PROFILE_TEMPLATE = {
-	TimePlayed = 0,
-	World = DEFAULT_WORLD,
-	Coins = DEFAULT_COINS,
-	EquippedCart = DEFAULT_EQUIPPED_CART,
-
-	Settings = {
-		MusicEnabled = true,
-		ShadowsEnabled = true,
-	},
 }
 
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local packages: Folder = ServerStorage:WaitForChild("Packages")
 local profileStoreModule = require(packages:WaitForChild("ProfileStore"))
+local profileTemplate = require(script:WaitForChild("ProfileTemplate"))
 local dataUtility = require(replicatedModules:WaitForChild("Data"):WaitForChild("DataUtility"))
 
 ------------------//VARIABLES
-local store = profileStoreModule.New(STORE_NAME, PROFILE_TEMPLATE)
+local store = profileStoreModule.New(STORE_NAME, profileTemplate)
 local profilesByUserId: { [number]: any } = {}
 
 ------------------//FUNCTIONS
 local function normalize_profile_data(profileData: any): ()
 	local world = profileData.World
-	if type(world) ~= "number" or world ~= world or world < DEFAULT_WORLD or world == math.huge then
-		profileData.World = DEFAULT_WORLD
+	if type(world) ~= "number" or world ~= world or world < profileTemplate.World or world == math.huge then
+		profileData.World = profileTemplate.World
 	else
 		profileData.World = math.floor(world)
 	end
 
 	local coins = profileData.Coins
-	if type(coins) ~= "number" or coins ~= coins or coins < DEFAULT_COINS or coins == math.huge then
-		profileData.Coins = DEFAULT_COINS
+	if type(coins) ~= "number" or coins ~= coins or coins < profileTemplate.Coins or coins == math.huge then
+		profileData.Coins = profileTemplate.Coins
 	else
 		profileData.Coins = math.floor(coins)
 	end
 
 	if type(profileData.EquippedCart) ~= "string" or profileData.EquippedCart == "" then
-		profileData.EquippedCart = DEFAULT_EQUIPPED_CART
+		profileData.EquippedCart = profileTemplate.EquippedCart
 	end
 end
 
