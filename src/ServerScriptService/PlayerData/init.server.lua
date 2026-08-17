@@ -6,6 +6,8 @@ local ServerStorage: ServerStorage = game:GetService("ServerStorage")
 
 ------------------//CONSTANTS
 local STORE_NAME: string = RunService:IsStudio() and "PlayerData_Studio_v1" or "PlayerData_v1"
+local DEFAULT_MUSIC_VOLUME: number = 0.5
+local DEFAULT_SFX_VOLUME: number = 0.5
 local RUNTIME_DATA_PATHS: {string} = {
 	"World",
 	"Coins",
@@ -41,6 +43,35 @@ local function normalize_profile_data(profileData: any): ()
 
 	if type(profileData.EquippedCart) ~= "string" or profileData.EquippedCart == "" then
 		profileData.EquippedCart = profileTemplate.EquippedCart
+	end
+
+	local settings = profileData.Settings
+	if type(settings) ~= "table" then
+		settings = {}
+		profileData.Settings = settings
+	end
+
+	if type(settings.MusicEnabled) ~= "boolean" then
+		settings.MusicEnabled = true
+	end
+	if type(settings.SFXEnabled) ~= "boolean" then
+		settings.SFXEnabled = true
+	end
+	if type(settings.MusicVolume) ~= "number" or settings.MusicVolume ~= settings.MusicVolume then
+		settings.MusicVolume = DEFAULT_MUSIC_VOLUME
+	else
+		settings.MusicVolume = math.clamp(settings.MusicVolume, 0, 1)
+	end
+	if type(settings.SFXVolume) ~= "number" or settings.SFXVolume ~= settings.SFXVolume then
+		settings.SFXVolume = DEFAULT_SFX_VOLUME
+	else
+		settings.SFXVolume = math.clamp(settings.SFXVolume, 0, 1)
+	end
+	if type(settings.ShadowsEnabled) ~= "boolean" then
+		settings.ShadowsEnabled = true
+	end
+	if type(settings.VFXEnabled) ~= "boolean" then
+		settings.VFXEnabled = true
 	end
 end
 

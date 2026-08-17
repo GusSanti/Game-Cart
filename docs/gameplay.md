@@ -12,6 +12,41 @@ O perfil persistente mantém estes campos no nível raiz:
 
 O servidor replica os três valores também como atributos do `Player`. Alterações persistentes continuam sendo feitas somente no servidor por `DataUtility.server.set`.
 
+## Recompensas diárias
+
+`StarterGui.Main.Frames.DailyRewards.Content.Days` contém os sete cards fixos `Day_1` a `Day_7`. `DailyRewards.client.lua` lê `DayIndex` de cada card, configura o valor em `Reward`, aplica o ícone de moedas em `RewardIcon` e alterna `Status` entre `CLAIM!`, `CLAIMED` e `LOCKED`, sem alterar os textos estáticos dos dias.
+
+As recompensas são definidas em `ReplicatedStorage.Modules.DailyRewardDefinitions.lua`. Nesta primeira versão todos os cards concedem moedas: 100, 150, 250, 350, 500, 750 e 1000. O estado persistente `DailyRewards` guarda o dia atual, a última coleta, os dias resgatados, `Streak` e `LastLoginDay`. A `Streak` aumenta uma vez quando o jogador entra em um novo dia consecutivo; se houver um dia de ausência, ela volta para `1`.
+
+O servidor valida a coleta por `DailyRewardRemotes.ClaimReward`, exige o dia atualmente liberado, permite uma coleta por dia do calendário e concede a moeda usando `DataUtility.server.set`. A inicialização do jogador não coleta nenhuma recompensa: o card permanece `CLAIM!` até o jogador clicar nele. Ao completar o sétimo dia, o ciclo reinicia no primeiro dia após o próximo dia do calendário.
+
+## Missões
+
+`StarterGui.Main.Frames.Quests` é controlada no cliente por `Quests.client.lua`. As abas filtram as missões diária, semanal e mensal; o cliente reconstrói o `ScrollingFrame` `Content` usando seu `Template` e `UIListLayout` para cada filtro. Cada card atualiza `Progress.Fill`, mostra a contagem em `Progress.Label`, exibe a recompensa em `Reward.Label` e remove o card após um claim confirmado.
+
+As missões são definidas separadamente nas listas `Daily`, `Weekly` e `Monthly` de `ReplicatedStorage.Modules.QuestDefinitions.lua` e validadas pelo servidor em `ServerStorage.Modules.QuestService.lua`. O progresso é alimentado somente por eventos de mecânicas autorizadas: pulos válidos, moedas coletadas, corridas limpas que ativam overdrive e chegada ao final da descida. O remote `QuestRemotes.ClaimQuest` valida a conclusão, impede claims duplicados e concede a recompensa em moedas.
+
+As missões atuais são:
+
+- Diária: pular 3 vezes.
+- Semanais: coletar 100 moedas, chegar ao final de 3 mundos e ativar overdrive 5 vezes sem impactos.
+- Mensais: coletar 500 moedas, chegar ao final de 10 mundos e pular 25 vezes.
+
+## Configurações da interface
+
+`StarterGui.Main.Frames.Settings` é controlada no cliente por `Settings.client.lua`. Os toggles sincronizam o estado visual do botão com a opção escolhida, os sliders atualizam `Fill`, `Knob` e o percentual em tempo real, e cada alteração é enviada ao servidor por `SettingsService.server.lua` após validação.
+
+As preferências persistentes ficam em `Settings` no perfil do jogador:
+
+| Campo | Tipo | Padrão | Uso |
+| --- | --- | --- | --- |
+| `MusicEnabled` | booleano | `true` | habilita ou silencia a música |
+| `SFXEnabled` | booleano | `true` | habilita ou silencia efeitos sonoros |
+| `MusicVolume` | número entre `0` e `1` | `0.5` | volume do grupo de música |
+| `SFXVolume` | número entre `0` e `1` | `0.5` | volume do grupo de efeitos sonoros |
+| `ShadowsEnabled` | booleano | `true` | controla `Lighting.GlobalShadows` |
+| `VFXEnabled` | booleano | `true` | controla as partículas, highlights e flashes locais |
+
 ## Configuração da área de salto
 
 Em `Workspace.World1`, a peça `JumpArea` é a área de interação do salto. O servidor também aceita `JumpArea` dentro de um `Model` com esse nome. O mundo é lido do atributo numérico `World` ou de um ancestral chamado `World1`, `World_2`, `Mundo1` e variações equivalentes; se nada for definido, a área pertence ao mundo `1`.

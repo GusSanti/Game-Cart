@@ -585,6 +585,7 @@ local function collect_coin(coin: BasePart, hitPart: BasePart): ()
 		collectionHitbox.CanQuery = false
 	end
 	award_coin(player)
+	game:GetService("ServerStorage"):WaitForChild("QuestEvents"):WaitForChild("RecordEvent"):Fire(player, "CoinCollected", COIN_REWARD_VALUE)
 
 	local collectTween = TweenService:Create(
 		coin,

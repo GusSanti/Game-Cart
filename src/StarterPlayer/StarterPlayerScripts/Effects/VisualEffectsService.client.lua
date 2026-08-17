@@ -12,6 +12,7 @@ local CART_OVERDRIVE_ACTIVE_ATTRIBUTE: string = "CartOverdriveActive"
 local CART_MAX_HEALTH_ATTRIBUTE: string = "CartMaxHealth"
 local CART_HEALTH_ATTRIBUTE: string = "CartHealth"
 local IS_RAMP_SLIDING_ATTRIBUTE: string = "IsRampSliding"
+local VFX_ENABLED_ATTRIBUTE: string = "VFXEnabled"
 local CART_MODEL_NAME: string = "Model"
 local WHEEL_NAME: string = "wheel"
 local WHEEL_NAME_PORTUGUESE: string = "roda"
@@ -88,6 +89,10 @@ local function clear_spark_effects(): ()
 	table.clear(overdriveEmitters)
 end
 
+local function is_vfx_enabled(): boolean
+	return localPlayer:GetAttribute(VFX_ENABLED_ATTRIBUTE) ~= false
+end
+
 local function get_part_side(rootPart: BasePart, partPosition: Vector3): number
 	local localPosition = rootPart.CFrame:PointToObjectSpace(partPosition)
 	if math.abs(localPosition.X) < MINIMUM_WHEEL_SIDE_DISTANCE then
@@ -153,6 +158,10 @@ local function create_fallback_spark_effects(character: Model, rootPart: BasePar
 end
 
 local function create_spark_effects(character: Model): ()
+	if not is_vfx_enabled() then
+		return
+	end
+
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not rootPart or not rootPart:IsA("BasePart") then
 		return
@@ -185,7 +194,9 @@ local function update_spark_state(): ()
 	local directionAttribute = activeCharacter:GetAttribute(CART_TILT_DIRECTION_ATTRIBUTE)
 	local tiltDirection = if type(directionAttribute) == "number" then math.sign(directionAttribute) else 0
 	for _, sparkEffect in sparkEffects do
-		sparkEffect.emitter.Enabled = isTilted and should_emit_from_side(sparkEffect.side, tiltDirection)
+		sparkEffect.emitter.Enabled = is_vfx_enabled()
+			and isTilted
+			and should_emit_from_side(sparkEffect.side, tiltDirection)
 	end
 end
 
@@ -344,7 +355,7 @@ end
 
 local function update_overdrive_effects(): ()
 	local isOverdriveActive = activeCharacter and activeCharacter:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) == true
-	if isOverdriveActive and #overdriveEmitters == 0 then
+	if is_vfx_enabled() and isOverdriveActive and #overdriveEmitters == 0 then
 		for _, sparkEffect in sparkEffects do
 			table.insert(overdriveEmitters, create_overdrive_emitter(sparkEffect.attachment))
 		end
@@ -355,6 +366,17 @@ local function update_overdrive_effects(): ()
 	end
 
 	update_health_display()
+end
+
+local function update_vfx_state(): ()
+	if not is_vfx_enabled() then
+		clear_spark_effects()
+	elseif activeCharacter and #sparkEffects == 0 then
+		create_spark_effects(activeCharacter)
+	end
+
+	update_spark_state()
+	update_overdrive_effects()
 end
 
 local function flash_character_red(character: Model): ()
@@ -434,6 +456,10 @@ local function on_impact_feedback(damage: number): ()
 	if type(damage) ~= "number" or damage <= 0 then
 		return
 	end
+	if not is_vfx_enabled() then
+		update_health_display()
+		return
+	end
 
 	if activeCharacter then
 		flash_character_red(activeCharacter)
@@ -444,7 +470,7 @@ local function on_impact_feedback(damage: number): ()
 end
 
 local function emit_landing_sparks(): ()
-	if not activeCharacter then
+	if not activeCharacter or not is_vfx_enabled() then
 		return
 	end
 
@@ -507,7 +533,9 @@ end
 local function bind_character(character: Model): ()
 	unbind_character()
 	activeCharacter = character
-	create_spark_effects(character)
+	if is_vfx_enabled() then
+		create_spark_effects(character)
+	end
 	table.insert(
 		characterConnections,
 		character:GetAttributeChangedSignal(CART_TILT_ACTIVE_ATTRIBUTE):Connect(update_spark_state)
@@ -544,6 +572,7 @@ end
 ------------------//INIT
 ensure_health_gui()
 impactFeedback.OnClientEvent:Connect(on_impact_feedback)
+localPlayer:GetAttributeChangedSignal(VFX_ENABLED_ATTRIBUTE):Connect(update_vfx_state)
 localPlayer.CharacterAdded:Connect(bind_character)
 localPlayer.CharacterRemoving:Connect(unbind_character)
 

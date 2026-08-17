@@ -1,5 +1,6 @@
 ------------------//SERVICES
 local Players: Players = game:GetService("Players")
+local ReplicatedStorage: ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService: SoundService = game:GetService("SoundService")
 
 ------------------//CONSTANTS
@@ -8,6 +9,10 @@ local DEFAULT_RUNNING_SOUND_ID = "rbxasset://sounds/action_footsteps_plastic.mp3
 local BASE_FOOTSTEP_SPEED = 16
 local MIN_RUNNING_SPEED = 1
 local CHARACTER_LOAD_TIMEOUT = 5
+
+------------------//DEPENDENCIES
+local modules: Folder = ReplicatedStorage:WaitForChild("Modules")
+local soundUtility = require(modules:WaitForChild("Utility"):WaitForChild("SoundUtility"))
 
 ------------------//VARIABLES
 local player = Players.LocalPlayer
@@ -27,6 +32,7 @@ local function create_sound(name: string, soundId: string, rootPart: BasePart, l
 	sound.Archivable = false
 	sound.EmitterSize = 5
 	sound.RollOffMaxDistance = 150
+	sound.SoundGroup = soundUtility.get_sfx_group()
 	sound.Volume = 0.65
 	sound.Looped = looped
 	sound.Parent = rootPart

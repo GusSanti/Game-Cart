@@ -7,6 +7,8 @@ local DEFAULT_MUSIC_VOLUME = 0.5
 local DEFAULT_SFX_VOLUME = 0.5
 local FADE_DURATION = 1
 local MAX_SFX_INSTANCES = 3
+local MUSIC_GROUP_NAME = "MusicGroup"
+local SFX_GROUP_NAME = "SFXGroup"
 
 ------------------//VARIABLES
 local soundUtility = {}
@@ -32,8 +34,22 @@ local function ensure_sound_group(name: string, volume: number): SoundGroup
 	return soundGroup
 end
 
-local musicGroup = ensure_sound_group("MusicGroup", musicVolume)
-local sfxGroup = ensure_sound_group("SFXGroup", sfxVolume)
+local musicGroup = ensure_sound_group(MUSIC_GROUP_NAME, musicVolume)
+local sfxGroup = ensure_sound_group(SFX_GROUP_NAME, sfxVolume)
+
+local function assign_sfx_group(instance: Instance): ()
+	if not instance:IsA("Sound") or instance.SoundGroup then
+		return
+	end
+
+	instance.SoundGroup = sfxGroup
+end
+
+for _, instance in SoundService:GetDescendants() do
+	assign_sfx_group(instance)
+end
+
+SoundService.DescendantAdded:Connect(assign_sfx_group)
 
 local function create_sound(soundId: string, parent: Instance, soundGroup: SoundGroup): Sound
 	local sound = Instance.new("Sound")
@@ -82,12 +98,12 @@ function soundUtility.play_music(soundId: string, fadeIn: boolean?, shouldLoop: 
 
 	local sound = create_sound(soundId, SoundService, musicGroup)
 	sound.Looped = shouldLoop ~= false
-	sound.Volume = if fadeIn then 0 else musicVolume
+	sound.Volume = if fadeIn then 0 else 1
 	currentMusic = sound
 	sound:Play()
 
 	if fadeIn then
-		fade_sound(sound, musicVolume, FADE_DURATION)
+		fade_sound(sound, 1, FADE_DURATION)
 	end
 
 	return sound
@@ -144,7 +160,7 @@ function soundUtility.play_sfx(soundId: string, parent: Instance?, volume: numbe
 	end
 
 	local sound = create_sound(soundId, parent or SoundService, sfxGroup)
-	sound.Volume = (volume or 1) * sfxVolume
+	sound.Volume = volume or 1
 	sound.PlaybackSpeed = pitch or 1
 	activeSfx[sound] = true
 	sound.Ended:Connect(function()
@@ -167,15 +183,12 @@ end
 
 function soundUtility.set_music_volume(volume: number): ()
 	musicVolume = math.clamp(volume, 0, 1)
-	musicGroup.Volume = musicVolume
-	if currentMusic and not musicMuted then
-		currentMusic.Volume = musicVolume
-	end
+	musicGroup.Volume = if musicMuted then 0 else musicVolume
 end
 
 function soundUtility.set_sfx_volume(volume: number): ()
 	sfxVolume = math.clamp(volume, 0, 1)
-	sfxGroup.Volume = sfxVolume
+	sfxGroup.Volume = if sfxMuted then 0 else sfxVolume
 end
 
 function soundUtility.get_music_volume(): number
@@ -188,13 +201,12 @@ end
 
 function soundUtility.mute_music(mute: boolean): ()
 	musicMuted = mute
-	if currentMusic then
-		currentMusic.Volume = if mute then 0 else musicVolume
-	end
+	musicGroup.Volume = if mute then 0 else musicVolume
 end
 
 function soundUtility.mute_sfx(mute: boolean): ()
 	sfxMuted = mute
+	sfxGroup.Volume = if mute then 0 else sfxVolume
 	if mute then
 		soundUtility.stop_all_sfx()
 	end
@@ -210,6 +222,10 @@ end
 
 function soundUtility.get_current_music(): Sound?
 	return currentMusic
+end
+
+function soundUtility.get_sfx_group(): SoundGroup
+	return sfxGroup
 end
 
 ------------------//INIT

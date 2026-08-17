@@ -11,6 +11,7 @@ local BUTTON_TO_FRAME: {[string]: string} = {
 	IconBtn_Settings = "Settings",
 	IconBtn_Codes = "Codes",
 }
+local SLIDER_KNOB_NAME: string = "Knob"
 
 ------------------//DEPENDENCIES
 local modules: Folder = ReplicatedStorage:WaitForChild("Modules")
@@ -96,6 +97,14 @@ local function configure_frame(frame: GuiObject): ()
 	connect_close_button(frame)
 end
 
+local function disable_slider_knob_animation(root: Instance): ()
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("ImageButton") and descendant.Name == SLIDER_KNOB_NAME then
+			descendant:SetAttribute("UIAnim", false)
+		end
+	end
+end
+
 ------------------//MAIN FUNCTIONS
 local function bind_main_gui(mainGui: ScreenGui): ()
 	if boundMainGui == mainGui then
@@ -119,6 +128,7 @@ local function bind_main_gui(mainGui: ScreenGui): ()
 	end
 
 	hudAnim.apply_defaults_to_buttons(mainGui)
+	disable_slider_knob_animation(mainGui)
 	hudAnim.bind_all(mainGui)
 
 	for buttonName, frameName in BUTTON_TO_FRAME do

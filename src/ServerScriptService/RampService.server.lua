@@ -65,6 +65,7 @@ type ActiveSlide = {
 	lastImpactAt: number,
 	lastControlRequestAt: number,
 	lastJumpAt: number,
+	cleanRunRecorded: boolean,
 }
 
 local registeredJumpAreas: {[BasePart]: boolean} = {}
@@ -188,6 +189,7 @@ local function begin_sliding(player: Player, character: Model, launchArea: BaseP
 		lastImpactAt = currentTime,
 		lastControlRequestAt = -math.huge,
 		lastJumpAt = -math.huge,
+		cleanRunRecorded = false,
 	}
 
 	activeCharacter:SetAttribute(IS_RAMP_SLIDING_ATTRIBUTE, true)
@@ -293,6 +295,7 @@ local function on_cart_control_request(player: Player, controlName: string, cont
 	slide.character:SetAttribute(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE, false)
 	slide.character:SetAttribute(RAMP_MODE_STATE_ATTRIBUTE, AIRBORNE_STATE)
 	rootPart.AssemblyLinearVelocity += Vector3.yAxis * upwardBoost
+	game:GetService("ServerStorage"):WaitForChild("QuestEvents"):WaitForChild("RecordEvent"):Fire(player, "Jump", 1)
 end
 
 local function get_player_from_hit(hitPart: BasePart): (Player?, Model?)
@@ -466,6 +469,10 @@ local function update_active_slides(deltaTime: number): ()
 		local shouldEnableOverdrive = modeState == SLIDE_STATE and slide.cleanRunElapsed >= CLEAN_RUN_DURATION
 		if slide.character:GetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE) ~= shouldEnableOverdrive then
 			slide.character:SetAttribute(CART_OVERDRIVE_ACTIVE_ATTRIBUTE, shouldEnableOverdrive)
+			if shouldEnableOverdrive and not slide.cleanRunRecorded then
+				slide.cleanRunRecorded = true
+				game:GetService("ServerStorage"):WaitForChild("QuestEvents"):WaitForChild("RecordEvent"):Fire(player, "CleanRun", 1)
+			end
 		end
 
 		if player.Character ~= slide.character or not slide.character.Parent then
@@ -482,6 +489,10 @@ local function update_active_slides(deltaTime: number): ()
 		then
 			continue
 		elseif currentTime - slide.lastGroundedAt >= GROUND_LOST_GRACE_PERIOD then
+			local cartHealth = slide.character:GetAttribute(CART_HEALTH_ATTRIBUTE)
+			if slide.launchedAt > 0 and type(cartHealth) == "number" and cartHealth > 0 then
+				game:GetService("ServerStorage"):WaitForChild("QuestEvents"):WaitForChild("RecordEvent"):Fire(player, "WorldFinished", 1)
+			end
 			stop_sliding(player)
 		end
 	end
