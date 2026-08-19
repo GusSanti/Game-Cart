@@ -9,13 +9,14 @@ local UserInputService: UserInputService = game:GetService("UserInputService")
 local IS_RAMP_SLIDING_ATTRIBUTE: string = "IsRampSliding"
 local RAMP_MODE_STATE_ATTRIBUTE: string = "RampModeState"
 local RAMP_LAUNCH_ACCEPTED_ATTRIBUTE: string = "RampLaunchAccepted"
-local RAMP_LAUNCH_POWER_ATTRIBUTE: string = "RampLaunchPower"
+local RAMP_AIRBORNE_VELOCITY_ATTRIBUTE: string = "RampAirborneVelocity"
 local RAMP_ENTRY_BOOST_SPEED_ATTRIBUTE: string = "RampEntryBoostSpeed"
 local CART_TILT_ACTIVE_ATTRIBUTE: string = "IsCartTilted"
 local CART_TILT_DIRECTION_ATTRIBUTE: string = "CartTiltDirection"
 local CART_TILT_IMPACT_ATTRIBUTE: string = "CartTiltImpact"
 local CART_JUMP_ACTIVE_ATTRIBUTE: string = "CartJumpActive"
-local CART_JUMP_POWER_ATTRIBUTE: string = "CartJumpPower"
+local CART_JUMP_ENERGY_ATTRIBUTE: string = "CartJumpEnergy"
+local CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE: string = "CartJumpEnergyMaximum"
 local CHARGE_STATE: string = "Charge"
 local AIRBORNE_STATE: string = "Airborne"
 local SLIDE_STATE: string = "Slide"
@@ -25,7 +26,6 @@ local MAX_SPEED_ATTRIBUTE: string = "MaxSpeed"
 local ACCELERATION_ATTRIBUTE: string = "Acceleration"
 local COASTING_ACCELERATION_ATTRIBUTE: string = "CoastingAcceleration"
 local STEERING_ACCELERATION_ATTRIBUTE: string = "SteeringAcceleration"
-local LAUNCH_UPWARD_BOOST_ATTRIBUTE: string = "LaunchUpwardBoost"
 local LAUNCH_FORWARD_BOOST_ATTRIBUTE: string = "LaunchForwardBoost"
 local AIR_SPIN_DURATION_ATTRIBUTE: string = "AirSpinDuration"
 local AIR_ROLL_ANGLE_ATTRIBUTE: string = "AirRollAngle"
@@ -42,6 +42,19 @@ local CART_JUMP_BUTTON_TITLE: string = "PULAR"
 local CART_TILT_METER_GUI_NAME: string = "CartTiltMeter"
 local GROUND_CHECK_DISTANCE: number = 10
 local AIRBORNE_GROUND_CHECK_DISTANCE: number = 14
+local RAYCAST_VISUAL_CONFIG = {
+	landingDistance = 120,
+	groundName = "GroundRaycastVisual",
+	landingName = "LandingRaycastVisual",
+	thickness = 0.22,
+	transparency = 0.1,
+	groundHitColor = Color3.fromRGB(40, 255, 90),
+	groundMissColor = Color3.fromRGB(255, 55, 55),
+	landingHitColor = Color3.fromRGB(0, 210, 255),
+	landingMissColor = Color3.fromRGB(255, 170, 0),
+	landingResponsiveness = 80,
+	landingMaxAngularVelocity = 80,
+}
 local MIN_AIRBORNE_TIME: number = 0.28
 local EXTRA_DOWNWARD_ACCELERATION: number = 70
 local SURFACE_ADHESION_ACCELERATION: number = 55
@@ -49,7 +62,6 @@ local DEFAULT_MAX_SLIDE_SPEED: number = 45
 local DEFAULT_ACCELERATION: number = 16
 local DEFAULT_COASTING_ACCELERATION: number = 8
 local DEFAULT_STEERING_ACCELERATION: number = 16
-local DEFAULT_LAUNCH_UPWARD_BOOST: number = 78
 local DEFAULT_LAUNCH_FORWARD_BOOST: number = 54
 local DEFAULT_AIR_SPIN_DURATION: number = 1.05
 local DEFAULT_AIR_ROLL_ANGLE: number = 14
@@ -75,13 +87,9 @@ local TILT_ENERGY_MAXIMUM: number = 1
 local TILT_ENERGY_DRAIN_DURATION: number = 1.7
 local TILT_ENERGY_RECOVERY_DURATION: number = 1.1
 local JUMP_CHARGE_DURATION: number = 1.2
-local JUMP_COOLDOWN_DURATION: number = 1.35
-local MINIMUM_JUMP_POWER: number = 0.15
-local MAXIMUM_JUMP_POWER: number = 1
-local MINIMUM_JUMP_UPWARD_BOOST: number = 72
-local MAXIMUM_JUMP_UPWARD_BOOST: number = 112
-local JUMP_ASCENT_ANIMATION_ANGLE: number = math.rad(34)
-local JUMP_ANIMATION_VERTICAL_REFERENCE: number = 110
+local FULL_JUMP_CHARGE_VALUE: number = 1
+local MAX_AIRBORNE_ASCENT_ANIMATION_ANGLE: number = math.rad(12)
+local AIRBORNE_ANIMATION_VERTICAL_REFERENCE: number = 70
 local OVERDRIVE_MAX_SPEED_MULTIPLIER: number = 1.28
 local OVERDRIVE_ACCELERATION_MULTIPLIER: number = 1.2
 local OVERDRIVE_COASTING_ACCELERATION_MULTIPLIER: number = 1.15
@@ -90,6 +98,7 @@ local OVERDRIVE_STEERING_ACCELERATION_MULTIPLIER: number = 1.1
 ------------------//DEPENDENCIES
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
+local cartGameplayConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("CartGameplayConfig"))
 
 ------------------//VARIABLES
 type HumanoidDefaults = {
@@ -113,7 +122,7 @@ type MeterState = {
 type JumpState = {
 	isCharging: boolean,
 	chargeStartedAt: number,
-	cooldownEndsAt: number,
+	nextRequestAt: number,
 }
 
 local localPlayer: Player = Players.LocalPlayer
@@ -130,6 +139,8 @@ local isSliding: boolean = false
 local forceAttachment: Attachment?
 local slideForce: VectorForce?
 local slideOrientation: AlignOrientation?
+local groundRaycastVisual: Part?
+local landingRaycastVisual: Part?
 local animationPlayedConnection: RBXScriptConnection?
 local originalPhysicalProperties = {}
 local animateScript: LocalScript?
@@ -146,7 +157,6 @@ local activeMaxSlideSpeed: number = DEFAULT_MAX_SLIDE_SPEED
 local activeAcceleration: number = DEFAULT_ACCELERATION
 local activeCoastingAcceleration: number = DEFAULT_COASTING_ACCELERATION
 local activeSteeringAcceleration: number = DEFAULT_STEERING_ACCELERATION
-local activeLaunchUpwardBoost: number = DEFAULT_LAUNCH_UPWARD_BOOST
 local activeLaunchForwardBoost: number = DEFAULT_LAUNCH_FORWARD_BOOST
 local activeAirSpinDuration: number = DEFAULT_AIR_SPIN_DURATION
 local activeAirRollAngle: number = DEFAULT_AIR_ROLL_ANGLE
@@ -157,6 +167,7 @@ local configuredCoastingAcceleration: number = DEFAULT_COASTING_ACCELERATION
 local configuredSteeringAcceleration: number = DEFAULT_STEERING_ACCELERATION
 local currentSpeedLimit: number = 0
 local isAirborne: boolean = false
+local isPreparingLanding: boolean = false
 local airborneElapsed: number = 0
 local airSpinAngle: number = 0
 local chargeCFrame: CFrame?
@@ -183,7 +194,7 @@ local meterState: MeterState = {
 local jumpState: JumpState = {
 	isCharging = false,
 	chargeStartedAt = 0,
-	cooldownEndsAt = 0,
+	nextRequestAt = 0,
 }
 
 ------------------//FUNCTIONS
@@ -247,11 +258,6 @@ local function update_cart_configuration(): ()
 		STEERING_ACCELERATION_ATTRIBUTE,
 		DEFAULT_STEERING_ACCELERATION
 	)
-	activeLaunchUpwardBoost = get_positive_number_attribute(
-		cart,
-		LAUNCH_UPWARD_BOOST_ATTRIBUTE,
-		DEFAULT_LAUNCH_UPWARD_BOOST
-	)
 	activeLaunchForwardBoost = get_positive_number_attribute(
 		cart,
 		LAUNCH_FORWARD_BOOST_ATTRIBUTE,
@@ -281,133 +287,35 @@ local function create_tilt_meter(): ()
 		return
 	end
 
-	local existingMeterGui = localPlayer.PlayerGui:FindFirstChild(CART_TILT_METER_GUI_NAME)
-	if existingMeterGui and existingMeterGui:IsA("ScreenGui") then
-		existingMeterGui:Destroy()
+	local meterGui = localPlayer.PlayerGui:FindFirstChild(CART_TILT_METER_GUI_NAME)
+		or localPlayer.PlayerGui:WaitForChild(CART_TILT_METER_GUI_NAME, 5)
+	if not meterGui or not meterGui:IsA("ScreenGui") then
+		return
 	end
 
-	local newMeterGui = Instance.new("ScreenGui")
-	newMeterGui.Name = CART_TILT_METER_GUI_NAME
-	newMeterGui.ResetOnSpawn = false
-	newMeterGui.IgnoreGuiInset = true
-	newMeterGui.DisplayOrder = 8
-	newMeterGui.Enabled = false
-	newMeterGui.Parent = localPlayer.PlayerGui
+	local meterFrame = meterGui:FindFirstChild("Meter")
+	local jumpMeter = meterGui:FindFirstChild("JumpMeter")
+	if not meterFrame or not meterFrame:IsA("Frame") or not jumpMeter or not jumpMeter:IsA("Frame") then
+		return
+	end
 
-	local meterFrame = Instance.new("Frame")
-	meterFrame.Name = "Meter"
-	meterFrame.AnchorPoint = Vector2.new(0.5, 1)
-	meterFrame.Position = UDim2.new(0.5, 0, 1, -96)
-	meterFrame.Size = UDim2.fromOffset(272, 48)
-	meterFrame.BackgroundColor3 = Color3.fromRGB(18, 22, 38)
-	meterFrame.BackgroundTransparency = 0.12
-	meterFrame.BorderSizePixel = 0
-	meterFrame.Parent = newMeterGui
+	local meterLabel = meterFrame:FindFirstChild("Label")
+	local fill = meterFrame:FindFirstChild("Fill", true)
+	local jumpLabel = jumpMeter:FindFirstChild("Label")
+	local jumpFill = jumpMeter:FindFirstChild("Fill", true)
+	if not meterLabel
+		or not meterLabel:IsA("TextLabel")
+		or not fill
+		or not fill:IsA("Frame")
+		or not jumpLabel
+		or not jumpLabel:IsA("TextLabel")
+		or not jumpFill
+		or not jumpFill:IsA("Frame")
+	then
+		return
+	end
 
-	local meterCorner = Instance.new("UICorner")
-	meterCorner.CornerRadius = UDim.new(0, 12)
-	meterCorner.Parent = meterFrame
-
-	local meterStroke = Instance.new("UIStroke")
-	meterStroke.Color = Color3.fromRGB(135, 162, 255)
-	meterStroke.Transparency = 0.2
-	meterStroke.Thickness = 2
-	meterStroke.Parent = meterFrame
-
-	local meterLabel = Instance.new("TextLabel")
-	meterLabel.Name = "Label"
-	meterLabel.Position = UDim2.fromOffset(12, 4)
-	meterLabel.Size = UDim2.new(1, -24, 0, 17)
-	meterLabel.BackgroundTransparency = 1
-	meterLabel.Font = Enum.Font.GothamBlack
-	meterLabel.Text = "INCLINAÇÃO  •  SHIFT + A/D"
-	meterLabel.TextColor3 = Color3.fromRGB(240, 244, 255)
-	meterLabel.TextSize = 12
-	meterLabel.TextXAlignment = Enum.TextXAlignment.Left
-	meterLabel.Parent = meterFrame
-
-	local track = Instance.new("Frame")
-	track.Name = "Track"
-	track.Position = UDim2.fromOffset(12, 27)
-	track.Size = UDim2.new(1, -24, 0, 11)
-	track.BackgroundColor3 = Color3.fromRGB(50, 59, 88)
-	track.BorderSizePixel = 0
-	track.ClipsDescendants = true
-	track.Parent = meterFrame
-
-	local trackCorner = Instance.new("UICorner")
-	trackCorner.CornerRadius = UDim.new(1, 0)
-	trackCorner.Parent = track
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(1, 1)
-	fill.BackgroundColor3 = Color3.fromRGB(94, 255, 154)
-	fill.BorderSizePixel = 0
-	fill.Parent = track
-
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(1, 0)
-	fillCorner.Parent = fill
-
-	local jumpMeter = Instance.new("Frame")
-	jumpMeter.Name = "JumpMeter"
-	jumpMeter.AnchorPoint = Vector2.new(0.5, 1)
-	jumpMeter.Position = UDim2.new(0.5, 0, 1, -154)
-	jumpMeter.Size = UDim2.fromOffset(272, 48)
-	jumpMeter.BackgroundColor3 = Color3.fromRGB(29, 17, 49)
-	jumpMeter.BackgroundTransparency = 0.08
-	jumpMeter.BorderSizePixel = 0
-	jumpMeter.Visible = false
-	jumpMeter.Parent = newMeterGui
-
-	local jumpMeterCorner = Instance.new("UICorner")
-	jumpMeterCorner.CornerRadius = UDim.new(0, 12)
-	jumpMeterCorner.Parent = jumpMeter
-
-	local jumpMeterStroke = Instance.new("UIStroke")
-	jumpMeterStroke.Color = Color3.fromRGB(213, 120, 255)
-	jumpMeterStroke.Transparency = 0.15
-	jumpMeterStroke.Thickness = 2
-	jumpMeterStroke.Parent = jumpMeter
-
-	local jumpLabel = Instance.new("TextLabel")
-	jumpLabel.Name = "Label"
-	jumpLabel.Position = UDim2.fromOffset(12, 4)
-	jumpLabel.Size = UDim2.new(1, -24, 0, 17)
-	jumpLabel.BackgroundTransparency = 1
-	jumpLabel.Font = Enum.Font.GothamBlack
-	jumpLabel.Text = "SALTO TURBO  •  SEGURE ESPAÇO"
-	jumpLabel.TextColor3 = Color3.fromRGB(251, 238, 255)
-	jumpLabel.TextSize = 12
-	jumpLabel.TextXAlignment = Enum.TextXAlignment.Left
-	jumpLabel.Parent = jumpMeter
-
-	local jumpTrack = Instance.new("Frame")
-	jumpTrack.Name = "Track"
-	jumpTrack.Position = UDim2.fromOffset(12, 27)
-	jumpTrack.Size = UDim2.new(1, -24, 0, 11)
-	jumpTrack.BackgroundColor3 = Color3.fromRGB(73, 48, 99)
-	jumpTrack.BorderSizePixel = 0
-	jumpTrack.ClipsDescendants = true
-	jumpTrack.Parent = jumpMeter
-
-	local jumpTrackCorner = Instance.new("UICorner")
-	jumpTrackCorner.CornerRadius = UDim.new(1, 0)
-	jumpTrackCorner.Parent = jumpTrack
-
-	local jumpFill = Instance.new("Frame")
-	jumpFill.Name = "Fill"
-	jumpFill.Size = UDim2.fromScale(0, 1)
-	jumpFill.BackgroundColor3 = Color3.fromRGB(221, 112, 255)
-	jumpFill.BorderSizePixel = 0
-	jumpFill.Parent = jumpTrack
-
-	local jumpFillCorner = Instance.new("UICorner")
-	jumpFillCorner.CornerRadius = UDim.new(1, 0)
-	jumpFillCorner.Parent = jumpFill
-
-	meterState.tiltGui = newMeterGui
+	meterState.tiltGui = meterGui
 	meterState.tiltFill = fill
 	meterState.tiltLabel = meterLabel
 	meterState.jumpFrame = jumpMeter
@@ -417,7 +325,7 @@ end
 
 local function destroy_tilt_meter(): ()
 	if meterState.tiltGui then
-		meterState.tiltGui:Destroy()
+		meterState.tiltGui.Enabled = false
 	end
 	meterState.tiltGui = nil
 	meterState.tiltFill = nil
@@ -447,7 +355,7 @@ local function set_tilt_meter_visible(isVisible: boolean): ()
 		meterState.tiltGui.Enabled = isVisible
 	end
 	if meterState.jumpFrame then
-		meterState.jumpFrame.Visible = false
+		meterState.jumpFrame.Visible = isVisible
 	end
 	update_tilt_meter()
 end
@@ -480,18 +388,34 @@ local function update_jump_charge_meter(): ()
 		return
 	end
 
-	local isVisible = jumpState.isCharging
-		and isSliding
-		and not isAirborne
-		and character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == SLIDE_STATE
+	local isVisible = isSliding and character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) == SLIDE_STATE
 	meterState.jumpFrame.Visible = isVisible
 	if not isVisible then
 		return
 	end
 
+	local energyAttribute = character:GetAttribute(CART_JUMP_ENERGY_ATTRIBUTE)
+	local maximumAttribute = character:GetAttribute(CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE)
+	local maximumEnergy = if type(maximumAttribute) == "number" and maximumAttribute > 0
+		then maximumAttribute
+		else cartGameplayConfig.jumpEnergyMaximum
+	local jumpEnergy = if type(energyAttribute) == "number" then energyAttribute else maximumEnergy
+	local energyRatio = math.clamp(jumpEnergy / maximumEnergy, 0, 1)
 	local chargeValue = get_jump_charge_value()
-	meterState.jumpFill.Size = UDim2.fromScale(chargeValue, 1)
-	meterState.jumpLabel.Text = ("SALTO TURBO  •  %d%%"):format(math.round(chargeValue * 100))
+	local fillRatio = if jumpState.isCharging then chargeValue else energyRatio
+	meterState.jumpFill.Size = UDim2.fromScale(fillRatio, 1)
+	meterState.jumpFill.BackgroundColor3 = if energyRatio >= 0.6
+		then Color3.fromRGB(221, 112, 255)
+		elseif energyRatio >= 0.35 then Color3.fromRGB(255, 183, 77)
+		else Color3.fromRGB(255, 92, 108)
+	meterState.jumpLabel.Text = if jumpState.isCharging
+		then ("CARGA %d%%  •  ENERGIA %d%%"):format(
+			math.round(chargeValue * 100),
+			math.round(energyRatio * 100)
+		)
+		elseif energyRatio < FULL_JUMP_CHARGE_VALUE
+			then ("PULO  •  REQUER ENERGIA 100%%  (%d%%)"):format(math.round(energyRatio * 100))
+			else "PULO  •  ENERGIA 100%"
 end
 
 local function clear_jump_charge(): ()
@@ -504,8 +428,17 @@ local function begin_jump_charge(): ()
 	if not isSliding
 		or isAirborne
 		or jumpState.isCharging
-		or os.clock() < jumpState.cooldownEndsAt
+		or os.clock() < jumpState.nextRequestAt
 		or character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) ~= SLIDE_STATE
+	then
+		return
+	end
+	local jumpEnergy = character:GetAttribute(CART_JUMP_ENERGY_ATTRIBUTE)
+	local maximumEnergy = character:GetAttribute(CART_JUMP_ENERGY_MAXIMUM_ATTRIBUTE)
+	if type(jumpEnergy) ~= "number"
+		or type(maximumEnergy) ~= "number"
+		or maximumEnergy <= 0
+		or jumpEnergy < maximumEnergy
 	then
 		return
 	end
@@ -526,9 +459,12 @@ local function release_jump_charge(): ()
 	if not isSliding or character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) ~= SLIDE_STATE then
 		return
 	end
+	if chargeValue < FULL_JUMP_CHARGE_VALUE then
+		return
+	end
 
-	jumpState.cooldownEndsAt = os.clock() + JUMP_COOLDOWN_DURATION
-	cartControlRequest:FireServer("Jump", chargeValue)
+	jumpState.nextRequestAt = os.clock() + cartGameplayConfig.jumpMinimumInterval
+	cartControlRequest:FireServer("Jump", FULL_JUMP_CHARGE_VALUE)
 end
 
 local function set_cart_tilt_effect_state(isActive: boolean, direction: number): ()
@@ -623,6 +559,7 @@ local function get_touch_tilt_direction(movementInput: Vector3, groundNormal: Ve
 end
 
 local function update_cart_tilt(deltaTime: number, groundNormal: Vector3, movementInput: Vector3): boolean
+	local wasCartTilted = isCartTilted
 	local requestedDirection = get_keyboard_tilt_direction()
 	if requestedDirection == 0 then
 		requestedDirection = get_touch_tilt_direction(movementInput, groundNormal)
@@ -642,6 +579,9 @@ local function update_cart_tilt(deltaTime: number, groundNormal: Vector3, moveme
 
 	if isCartTilted and requestedDirection == 0 then
 		start_cart_tilt_landing()
+	end
+	if isCartTilted and not wasCartTilted then
+		cartControlRequest:FireServer("Tilt", tiltDirection)
 	end
 
 	update_cart_tilt_animation(deltaTime)
@@ -789,6 +729,47 @@ local function get_ramp_ground(distance: number?): RaycastResult?
 	return nil
 end
 
+local function create_raycast_visual(name: string): Part
+	local raycastVisual = Instance.new("Part")
+	raycastVisual.Name = name
+	raycastVisual.Anchored = true
+	raycastVisual.CanCollide = false
+	raycastVisual.CanQuery = false
+	raycastVisual.CanTouch = false
+	raycastVisual.CastShadow = false
+	raycastVisual.Material = Enum.Material.Neon
+	raycastVisual.Transparency = 1
+	raycastVisual.Parent = workspace
+	return raycastVisual
+end
+
+local function update_raycast_visual(
+	raycastVisual: Part?,
+	distance: number,
+	didHitRamp: boolean,
+	hitColor: Color3,
+	missColor: Color3
+): ()
+	if not raycastVisual then
+		return
+	end
+
+	local rayDirection = Vector3.new(0, -distance, 0)
+	raycastVisual.Color = if didHitRamp then hitColor else missColor
+	raycastVisual.Size = Vector3.new(RAYCAST_VISUAL_CONFIG.thickness, RAYCAST_VISUAL_CONFIG.thickness, distance)
+	raycastVisual.CFrame = CFrame.lookAt(
+		rootPart.Position + rayDirection * 0.5,
+		rootPart.Position + rayDirection
+	)
+	raycastVisual.Transparency = RAYCAST_VISUAL_CONFIG.transparency
+end
+
+local function hide_raycast_visual(raycastVisual: Part?): ()
+	if raycastVisual then
+		raycastVisual.Transparency = 1
+	end
+end
+
 local function get_surface_forward(surfaceNormal: Vector3): Vector3
 	local forwardDirection = project_onto_plane(rootPart.CFrame.LookVector, surfaceNormal)
 	if forwardDirection.Magnitude > 0.01 then
@@ -804,6 +785,9 @@ local function get_surface_forward(surfaceNormal: Vector3): Vector3
 end
 
 local function create_slide_actuators(): ()
+	groundRaycastVisual = create_raycast_visual(RAYCAST_VISUAL_CONFIG.groundName)
+	landingRaycastVisual = create_raycast_visual(RAYCAST_VISUAL_CONFIG.landingName)
+
 	local attachment = Instance.new("Attachment")
 	attachment.Name = FORCE_ATTACHMENT_NAME
 	attachment.Parent = rootPart
@@ -828,41 +812,13 @@ local function create_slide_actuators(): ()
 	slideOrientation = alignOrientation
 end
 
-local function apply_airborne_boost(): ()
-	if rootPart.AssemblyLinearVelocity.Y > 20 then
+local function apply_authorized_airborne_velocity(): ()
+	local airborneVelocity = character:GetAttribute(RAMP_AIRBORNE_VELOCITY_ATTRIBUTE)
+	if typeof(airborneVelocity) ~= "Vector3" then
 		return
 	end
 
-	local groundResult = get_ramp_ground(AIRBORNE_GROUND_CHECK_DISTANCE)
-	local groundNormal = if groundResult then groundResult.Normal else Vector3.yAxis
-	local forwardDirection = get_surface_forward(groundNormal)
-	local launchPower = character:GetAttribute(RAMP_LAUNCH_POWER_ATTRIBUTE)
-	if type(launchPower) ~= "number" then
-		launchPower = 0.75
-	end
-	launchPower = math.clamp(launchPower, 0, 1)
-
-	local surfaceVelocity = project_onto_plane(rootPart.AssemblyLinearVelocity, groundNormal)
-	local currentForwardSpeed = surfaceVelocity:Dot(forwardDirection)
-	if currentForwardSpeed < 0 then
-		surfaceVelocity -= forwardDirection * currentForwardSpeed
-	end
-
-	local boostScale = 0.75 + launchPower * 0.25
-	rootPart.AssemblyLinearVelocity = surfaceVelocity
-		+ forwardDirection * activeLaunchForwardBoost * boostScale
-		+ Vector3.yAxis * activeLaunchUpwardBoost * boostScale
-	rootPart.AssemblyAngularVelocity = Vector3.zero
-end
-
-local function apply_cart_jump_boost(): ()
-	local jumpPowerAttribute = character:GetAttribute(CART_JUMP_POWER_ATTRIBUTE)
-	local jumpPower = if type(jumpPowerAttribute) == "number" then jumpPowerAttribute else MINIMUM_JUMP_POWER
-	jumpPower = math.clamp(jumpPower, MINIMUM_JUMP_POWER, MAXIMUM_JUMP_POWER)
-	local upwardBoost = MINIMUM_JUMP_UPWARD_BOOST
-		+ (MAXIMUM_JUMP_UPWARD_BOOST - MINIMUM_JUMP_UPWARD_BOOST) * jumpPower
-	local velocity = rootPart.AssemblyLinearVelocity
-	rootPart.AssemblyLinearVelocity = Vector3.new(velocity.X, math.max(velocity.Y, 0) + upwardBoost, velocity.Z)
+	rootPart.AssemblyLinearVelocity = airborneVelocity
 	rootPart.AssemblyAngularVelocity = Vector3.zero
 end
 
@@ -872,6 +828,7 @@ local function enter_airborne_state(): ()
 	end
 
 	isAirborne = true
+	isPreparingLanding = false
 	chargeCFrame = nil
 	clear_cart_tilt()
 	clear_jump_charge()
@@ -881,11 +838,7 @@ local function enter_airborne_state(): ()
 	rootPart.Anchored = false
 	airborneElapsed = 0
 	airSpinAngle = 0
-	if character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true then
-		apply_cart_jump_boost()
-	else
-		apply_airborne_boost()
-	end
+	apply_authorized_airborne_velocity()
 	if slideForce then
 		slideForce.Force = Vector3.zero
 	end
@@ -897,6 +850,7 @@ local function enter_charge_state(): ()
 	end
 
 	chargeCFrame = rootPart.CFrame
+	isPreparingLanding = false
 	clear_cart_tilt()
 	clear_jump_charge()
 	set_tilt_meter_visible(false)
@@ -911,10 +865,13 @@ local function enter_charge_state(): ()
 	if slideOrientation then
 		slideOrientation.CFrame = CFrame.lookAt(Vector3.zero, chargeCFrame.LookVector, chargeCFrame.UpVector)
 	end
+	hide_raycast_visual(groundRaycastVisual)
+	hide_raycast_visual(landingRaycastVisual)
 end
 
 local function leave_airborne_state(groundResult: RaycastResult): ()
 	isAirborne = false
+	isPreparingLanding = false
 	airborneElapsed = 0
 	airSpinAngle = 0
 	local groundNormal = groundResult.Normal
@@ -931,25 +888,26 @@ local function leave_airborne_state(groundResult: RaycastResult): ()
 	if slideOrientation and surfaceDirection.Magnitude > MIN_ORIENTATION_SPEED then
 		slideOrientation.CFrame = CFrame.lookAt(Vector3.zero, surfaceDirection.Unit, groundNormal)
 	end
+	hide_raycast_visual(landingRaycastVisual)
 end
 
 local function get_airborne_orientation(velocity: Vector3): CFrame
-	local lookDirection = if velocity.Magnitude > MIN_ORIENTATION_SPEED
-		then velocity.Unit
-		else rootPart.CFrame.LookVector
-	local upDirection = Vector3.yAxis
-	if math.abs(lookDirection:Dot(upDirection)) > 0.96 then
-		upDirection = Vector3.zAxis
-	end
-
-	local baseOrientation = CFrame.lookAt(Vector3.zero, lookDirection, upDirection)
+	local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	local rootForwardDirection = Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z)
+	local lookDirection = if horizontalVelocity.Magnitude > MIN_ORIENTATION_SPEED
+		then horizontalVelocity.Unit
+		elseif rootForwardDirection.Magnitude > MIN_ORIENTATION_SPEED
+			then rootForwardDirection.Unit
+			else Vector3.zAxis
+	local ascentPitch = math.clamp(
+		velocity.Y / AIRBORNE_ANIMATION_VERTICAL_REFERENCE,
+		-1,
+		1
+	) * MAX_AIRBORNE_ASCENT_ANIMATION_ANGLE
+	local baseOrientation = CFrame.lookAt(Vector3.zero, lookDirection, Vector3.yAxis)
+		* CFrame.Angles(ascentPitch, 0, 0)
 	if character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true then
-		local jumpPitch = math.clamp(
-			velocity.Y / JUMP_ANIMATION_VERTICAL_REFERENCE,
-			-1,
-			1
-		) * JUMP_ASCENT_ANIMATION_ANGLE
-		return baseOrientation * CFrame.Angles(jumpPitch, 0, 0)
+		return baseOrientation
 	end
 	local spinProgress = math.clamp(airborneElapsed / activeAirSpinDuration, 0, 1)
 	local easedProgress = 1 - (1 - spinProgress) ^ 3
@@ -960,14 +918,59 @@ end
 
 local function update_airborne_orientation(velocity: Vector3): ()
 	if slideOrientation then
+		slideOrientation.Responsiveness = ORIENTATION_RESPONSIVENESS
+		slideOrientation.MaxAngularVelocity = MAX_ANGULAR_VELOCITY
 		slideOrientation.CFrame = get_airborne_orientation(velocity)
 	end
+end
+
+local function update_landing_orientation(velocity: Vector3, groundResult: RaycastResult?): boolean
+	if not groundResult or not slideOrientation or velocity:Dot(groundResult.Normal) >= 0 then
+		return false
+	end
+
+	local surfaceVelocity = project_onto_plane(velocity, groundResult.Normal)
+	if surfaceVelocity.Magnitude < MIN_ORIENTATION_SPEED then
+		return false
+	end
+
+	local landingOrientation = CFrame.lookAt(Vector3.zero, surfaceVelocity.Unit, groundResult.Normal)
+	if not isPreparingLanding then
+		isPreparingLanding = true
+		local linearVelocity = rootPart.AssemblyLinearVelocity
+		rootPart.CFrame = CFrame.lookAt(
+			rootPart.Position,
+			rootPart.Position + surfaceVelocity.Unit,
+			groundResult.Normal
+		)
+		rootPart.AssemblyLinearVelocity = linearVelocity
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+	slideOrientation.Responsiveness = RAYCAST_VISUAL_CONFIG.landingResponsiveness
+	slideOrientation.MaxAngularVelocity = RAYCAST_VISUAL_CONFIG.landingMaxAngularVelocity
+	slideOrientation.CFrame = landingOrientation
+	return true
 end
 
 local function update_airborne_physics(deltaTime: number): ()
 	airborneElapsed += deltaTime
 	local velocity = rootPart.AssemblyLinearVelocity
+	local landingGroundResult = get_ramp_ground(RAYCAST_VISUAL_CONFIG.landingDistance)
 	local groundResult = get_ramp_ground(AIRBORNE_GROUND_CHECK_DISTANCE)
+	update_raycast_visual(
+		landingRaycastVisual,
+		RAYCAST_VISUAL_CONFIG.landingDistance,
+		landingGroundResult ~= nil,
+		RAYCAST_VISUAL_CONFIG.landingHitColor,
+		RAYCAST_VISUAL_CONFIG.landingMissColor
+	)
+	update_raycast_visual(
+		groundRaycastVisual,
+		AIRBORNE_GROUND_CHECK_DISTANCE,
+		groundResult ~= nil,
+		RAYCAST_VISUAL_CONFIG.groundHitColor,
+		RAYCAST_VISUAL_CONFIG.groundMissColor
+	)
 	if groundResult
 		and airborneElapsed >= MIN_AIRBORNE_TIME
 		and velocity:Dot(groundResult.Normal) <= 4
@@ -992,7 +995,9 @@ local function update_airborne_physics(deltaTime: number): ()
 	if slideForce then
 		slideForce.Force = Vector3.zero
 	end
-	update_airborne_orientation(velocity)
+	if not update_landing_orientation(velocity, landingGroundResult) and not isPreparingLanding then
+		update_airborne_orientation(velocity)
+	end
 end
 
 local function apply_entry_boost(): ()
@@ -1010,6 +1015,14 @@ local function apply_entry_boost(): ()
 end
 
 local function destroy_slide_actuators(): ()
+	if landingRaycastVisual then
+		landingRaycastVisual:Destroy()
+		landingRaycastVisual = nil
+	end
+	if groundRaycastVisual then
+		groundRaycastVisual:Destroy()
+		groundRaycastVisual = nil
+	end
 	if slideOrientation then
 		slideOrientation:Destroy()
 		slideOrientation = nil
@@ -1030,6 +1043,7 @@ local function enable_slide_state(): ()
 	end
 	isSliding = true
 	isAirborne = false
+	isPreparingLanding = false
 	airborneElapsed = 0
 	airSpinAngle = 0
 	chargeCFrame = nil
@@ -1089,6 +1103,7 @@ local function disable_slide_state(): ()
 	end
 	isSliding = false
 	isAirborne = false
+	isPreparingLanding = false
 	airborneElapsed = 0
 	airSpinAngle = 0
 	chargeCFrame = nil
@@ -1123,6 +1138,8 @@ local function update_orientation(velocity: Vector3, groundNormal: Vector3): ()
 	if not slideOrientation then
 		return
 	end
+	slideOrientation.Responsiveness = ORIENTATION_RESPONSIVENESS
+	slideOrientation.MaxAngularVelocity = MAX_ANGULAR_VELOCITY
 
 	local surfaceVelocity = project_onto_plane(velocity, groundNormal)
 	if surfaceVelocity.Magnitude < MIN_ORIENTATION_SPEED and math.abs(currentTiltAngle) < 0.001 then
@@ -1157,6 +1174,14 @@ local function update_slide_physics(deltaTime: number): ()
 	end
 
 	local groundResult = get_ramp_ground()
+	hide_raycast_visual(landingRaycastVisual)
+	update_raycast_visual(
+		groundRaycastVisual,
+		GROUND_CHECK_DISTANCE,
+		groundResult ~= nil,
+		RAYCAST_VISUAL_CONFIG.groundHitColor,
+		RAYCAST_VISUAL_CONFIG.groundMissColor
+	)
 	local groundNormal = if groundResult then groundResult.Normal else Vector3.yAxis
 	local mass = rootPart.AssemblyMass
 	local velocity = rootPart.AssemblyLinearVelocity
@@ -1251,9 +1276,7 @@ local function on_input_began(input: InputObject): ()
 		return
 	end
 
-	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-		cartControlRequest:FireServer("Shift")
-	elseif input.KeyCode == Enum.KeyCode.Space then
+	if input.KeyCode == Enum.KeyCode.Space then
 		begin_jump_charge()
 	end
 end
