@@ -33,6 +33,7 @@ flowchart LR
 - `RampCharacterService.lua` pré-monta e replica o próximo `Character` baseado no carrinho antes da entrada, corrige as juntas do rig e mantém uma cópia privada para restauração.
 - `CodeService.server.lua` valida códigos no servidor, registra resgates únicos e concede moedas usando o `DataUtility`.
 - `SettingsService.server.lua` valida e persiste as configurações de áudio, sombras e efeitos visuais recebidas do cliente.
+- `WeaponService.server.lua` valida arremessos, simula projéteis em coordenadas do mundo e aplica os efeitos de granada e banana nos carrinhos.
 - `QuestsService.server.lua` expõe o claim validado das missões, enquanto `QuestService.lua` mantém progresso, períodos e recompensas no perfil.
 - `DailyRewardsService.server.lua` valida a coleta diária, controla o cooldown de 24 horas, concede moedas e persiste o ciclo de sete dias.
 
@@ -46,6 +47,7 @@ flowchart LR
 - `Interface/DailyRewards.client.lua` renderiza os cards de `StarterGui.Main.Frames.DailyRewards.Content.Days`, atualiza ícone, valor e status das recompensas e solicita a coleta do dia atual.
 - `Gameplay/CharacterCamera.client.lua` mantém a câmera ligada ao `Humanoid` ativo durante trocas de personagem.
 - `Gameplay/RampLaunch.client.lua` oscila o medidor horizontal, o FOV de carregamento e envia a solicitação de salto quando o jogador pressiona Espaço.
+- `Gameplay/WeaponController.client.lua` controla equip, animações superiores, mira e prévia balística das armas de arremesso.
 - `RampSliding.client.lua` controla a física responsiva da descida durante o ciclo de vida do personagem.
 - `Gameplay/SpeedFov.client.lua` aplica FOV dinâmico, inclinação suave na direção das curvas e diagnóstico dos efeitos durante a descida.
 - `Effects/VisualEffectsService.client.lua` gera as faíscas locais nas rodas enquanto o carrinho está inclinado.
@@ -53,6 +55,8 @@ flowchart LR
 As preferências da interface são recebidas pelo `DataUtility` no cliente e alteradas por `SettingsService.server.lua`, que aceita somente os seis campos de configuração permitidos. `SoundUtility` controla os grupos `MusicGroup` e `SFXGroup`; `VisualEffectsService.client.lua` observa o atributo local `VFXEnabled` para criar ou remover os efeitos do carrinho.
 
 `Modules/Gameplay/CameraEffectStack.lua` é a base compartilhada para efeitos de câmera. Cada mecânica pode obter a instância atual com `get_current()` e registrar um deslocamento nomeado de FOV com `set_effect`, removendo-o com `remove_effect` sem alterar o controlador das outras mecânicas.
+
+`Modules/Gameplay/WeaponConfig.lua` e `ProjectileUtility.lua` são compartilhados pelo cliente e servidor para manter alcance, duração e trajetória consistentes. O cliente prevê o resultado, mas `WeaponService.server.lua` recalcula e valida o alvo antes de criar qualquer projétil. Veja [`weapons.md`](weapons.md).
 
 ## Dados e rede
 

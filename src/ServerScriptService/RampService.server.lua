@@ -55,6 +55,7 @@ local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local serverModules: Folder = ServerStorage:WaitForChild("Modules")
 local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
 local cartGameplayConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("CartGameplayConfig"))
+local weaponConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("WeaponConfig"))
 local rampCharacterService = require(serverModules:WaitForChild("RampCharacterService"))
 
 ------------------//VARIABLES
@@ -74,6 +75,7 @@ type ActiveSlide = {
 	lastFlowActionAt: number,
 	overdriveEndsAt: number,
 	jumpEnergy: number,
+	lastExternalLaunchSequence: number,
 }
 
 local registeredJumpAreas: {[BasePart]: boolean} = {}
@@ -205,6 +207,7 @@ local function begin_sliding(player: Player, character: Model, launchArea: BaseP
 		lastFlowActionAt = currentTime,
 		overdriveEndsAt = 0,
 		jumpEnergy = cartGameplayConfig.jumpEnergyMaximum,
+		lastExternalLaunchSequence = 0,
 	}
 
 	activeCharacter:SetAttribute(IS_RAMP_SLIDING_ATTRIBUTE, true)
@@ -586,6 +589,14 @@ local function update_active_slides(deltaTime: number): ()
 
 	local currentTime = os.clock()
 	for player, slide in activeSlidesByPlayer do
+		local externalLaunchSequence = slide.character:GetAttribute(weaponConfig.externalLaunchSequenceAttribute)
+		if type(externalLaunchSequence) == "number"
+			and externalLaunchSequence > slide.lastExternalLaunchSequence
+		then
+			slide.lastExternalLaunchSequence = externalLaunchSequence
+			slide.launchedAt = currentTime
+			slide.lastGroundedAt = currentTime
+		end
 		local modeState = slide.character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE)
 		if modeState == SLIDE_STATE and slide.character:GetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE) == true then
 			slide.character:SetAttribute(CART_JUMP_ACTIVE_ATTRIBUTE, false)

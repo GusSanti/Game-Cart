@@ -99,6 +99,7 @@ local OVERDRIVE_STEERING_ACCELERATION_MULTIPLIER: number = 1.1
 local replicatedModules: Folder = ReplicatedStorage:WaitForChild("Modules")
 local rampUtility = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("RampUtility"))
 local cartGameplayConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("CartGameplayConfig"))
+local weaponConfig = require(replicatedModules:WaitForChild("Gameplay"):WaitForChild("WeaponConfig"))
 
 ------------------//VARIABLES
 type HumanoidDefaults = {
@@ -170,6 +171,7 @@ local isAirborne: boolean = false
 local isPreparingLanding: boolean = false
 local airborneElapsed: number = 0
 local airSpinAngle: number = 0
+local bananaSpinAngle: number = 0
 local chargeCFrame: CFrame?
 local isCartTilted: boolean = false
 local isCartTiltActionBound: boolean = false
@@ -208,6 +210,11 @@ local function move_towards(currentValue: number, targetValue: number, maximumDe
 	end
 
 	return math.max(currentValue - maximumDelta, targetValue)
+end
+
+local function is_cart_spinning(): boolean
+	local spinUntil = character:GetAttribute(weaponConfig.spinUntilAttribute)
+	return type(spinUntil) == "number" and spinUntil > workspace:GetServerTimeNow()
 end
 
 local function get_positive_number_attribute(instance: Instance?, attributeName: string, fallback: number): number
@@ -427,6 +434,7 @@ end
 local function begin_jump_charge(): ()
 	if not isSliding
 		or isAirborne
+		or is_cart_spinning()
 		or jumpState.isCharging
 		or os.clock() < jumpState.nextRequestAt
 		or character:GetAttribute(RAMP_MODE_STATE_ATTRIBUTE) ~= SLIDE_STATE
@@ -675,6 +683,9 @@ local function unbind_cart_jump_action(): ()
 end
 
 local function stop_animation_track(animationTrack: AnimationTrack): ()
+	if animationTrack:GetAttribute(weaponConfig.allowRampAnimationAttribute) == true then
+		return
+	end
 	animationTrack:Stop(0)
 end
 
@@ -979,7 +990,8 @@ local function update_airborne_physics(deltaTime: number): ()
 		return
 	end
 
-	local movementInput = humanoid.MoveDirection
+	local isSpinning = is_cart_spinning()
+	local movementInput = if isSpinning then Vector3.zero else humanoid.MoveDirection
 	local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
 	if movementInput.Magnitude > 0.05 then
 		local targetSpeed = math.max(horizontalVelocity.Magnitude, activeLaunchForwardBoost * 0.65)
@@ -995,7 +1007,21 @@ local function update_airborne_physics(deltaTime: number): ()
 	if slideForce then
 		slideForce.Force = Vector3.zero
 	end
-	if not update_landing_orientation(velocity, landingGroundResult) and not isPreparingLanding then
+	if isSpinning and slideOrientation then
+		bananaSpinAngle += weaponConfig.spinAngularSpeed * deltaTime
+		local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+		local fallbackDirection = Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z)
+		if fallbackDirection.Magnitude < 0.01 then
+			fallbackDirection = Vector3.zAxis
+		end
+		local lookDirection = if horizontalVelocity.Magnitude >= MIN_ORIENTATION_SPEED
+			then horizontalVelocity.Unit
+			else fallbackDirection.Unit
+		slideOrientation.Responsiveness = ORIENTATION_RESPONSIVENESS
+		slideOrientation.MaxAngularVelocity = weaponConfig.spinAngularSpeed * 1.5
+		slideOrientation.CFrame = CFrame.lookAt(Vector3.zero, lookDirection, Vector3.yAxis)
+			* CFrame.Angles(0, bananaSpinAngle, 0)
+	elseif not update_landing_orientation(velocity, landingGroundResult) and not isPreparingLanding then
 		update_airborne_orientation(velocity)
 	end
 end
@@ -1134,7 +1160,7 @@ local function disable_slide_state(): ()
 	end
 end
 
-local function update_orientation(velocity: Vector3, groundNormal: Vector3): ()
+local function update_orientation(velocity: Vector3, groundNormal: Vector3, deltaTime: number): ()
 	if not slideOrientation then
 		return
 	end
@@ -1142,7 +1168,10 @@ local function update_orientation(velocity: Vector3, groundNormal: Vector3): ()
 	slideOrientation.MaxAngularVelocity = MAX_ANGULAR_VELOCITY
 
 	local surfaceVelocity = project_onto_plane(velocity, groundNormal)
-	if surfaceVelocity.Magnitude < MIN_ORIENTATION_SPEED and math.abs(currentTiltAngle) < 0.001 then
+	if surfaceVelocity.Magnitude < MIN_ORIENTATION_SPEED
+		and math.abs(currentTiltAngle) < 0.001
+		and not is_cart_spinning()
+	then
 		return
 	end
 
@@ -1150,6 +1179,13 @@ local function update_orientation(velocity: Vector3, groundNormal: Vector3): ()
 		then surfaceVelocity.Unit
 		else get_surface_forward(groundNormal)
 	local targetOrientation = CFrame.lookAt(Vector3.zero, lookDirection, groundNormal)
+	if is_cart_spinning() then
+		bananaSpinAngle += weaponConfig.spinAngularSpeed * deltaTime
+		slideOrientation.MaxAngularVelocity = weaponConfig.spinAngularSpeed * 1.5
+		targetOrientation *= CFrame.Angles(0, bananaSpinAngle, 0)
+	else
+		bananaSpinAngle = 0
+	end
 	slideOrientation.CFrame = targetOrientation * CFrame.Angles(0, 0, currentTiltAngle)
 end
 
@@ -1188,9 +1224,16 @@ local function update_slide_physics(deltaTime: number): ()
 	local totalAcceleration = Vector3.new(0, -EXTRA_DOWNWARD_ACCELERATION, 0)
 		- groundNormal * SURFACE_ADHESION_ACCELERATION
 
-	local movementInput = project_onto_plane(humanoid.MoveDirection, groundNormal)
+	local isSpinning = is_cart_spinning()
+	local movementInput = if isSpinning
+		then Vector3.zero
+		else project_onto_plane(humanoid.MoveDirection, groundNormal)
 	local isTiltSteering: boolean = false
-	if groundResult then
+	if isSpinning then
+		clear_jump_charge()
+		start_cart_tilt_landing()
+		update_cart_tilt_animation(deltaTime)
+	elseif groundResult then
 		isTiltSteering = update_cart_tilt(deltaTime, groundNormal, movementInput)
 	else
 		start_cart_tilt_landing()
@@ -1228,7 +1271,7 @@ local function update_slide_physics(deltaTime: number): ()
 	end
 
 	slideForce.Force = totalAcceleration * mass
-	update_orientation(velocity, groundNormal)
+	update_orientation(velocity, groundNormal, deltaTime)
 end
 
 ------------------//MAIN FUNCTIONS
@@ -1296,6 +1339,14 @@ character:GetAttributeChangedSignal(IS_RAMP_SLIDING_ATTRIBUTE):Connect(update_sl
 character:GetAttributeChangedSignal(RAMP_MODE_STATE_ATTRIBUTE):Connect(update_mode_state)
 character:GetAttributeChangedSignal(RAMP_LAUNCH_ACCEPTED_ATTRIBUTE):Connect(update_mode_state)
 character:GetAttributeChangedSignal(CART_OVERDRIVE_ACTIVE_ATTRIBUTE):Connect(update_overdrive_configuration)
+character:GetAttributeChangedSignal(weaponConfig.spinUntilAttribute):Connect(function()
+	if is_cart_spinning() then
+		clear_jump_charge()
+		start_cart_tilt_landing()
+	else
+		bananaSpinAngle = 0
+	end
+end)
 character.DescendantAdded:Connect(on_character_descendant_added)
 localPlayer:GetAttributeChangedSignal(EQUIPPED_CART_ATTRIBUTE):Connect(update_cart_configuration)
 humanoid.Died:Connect(disable_slide_state)

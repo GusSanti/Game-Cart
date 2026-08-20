@@ -75,6 +75,12 @@ Flow recompensa decisões ativas durante a descida. O medidor aumenta ao acertar
 
 Ao atingir `100`, o carrinho entra em Overdrive por `5` segundos. O estado aumenta velocidade, aceleração e resposta da direção, muda o HUD e intensifica FOV, vibração de câmera, desfoque e partículas de velocidade. Usar inclinação ou pulo não cancela o Overdrive.
 
+## Armas de arremesso
+
+Durante a descida, `Granade` e `Banana` podem ser miradas com o botão direito, `L2` ou o botão de contexto. A linha local e o X mostram o ponto validável de queda; o projétil segue uma trajetória em coordenadas do mundo e não herda a velocidade do carrinho.
+
+A granada lança outros carrinhos próximos para longe, sem afetar o dono. A banana permanece como armadilha e, ao ser tocada por outro jogador, bloqueia temporariamente direção, inclinação e pulo enquanto força o carrinho a girar. Parâmetros e estrutura dos assets estão documentados em [`weapons.md`](weapons.md).
+
 ## Configuração dos carrinhos
 
 O controlador procura o modelo indicado por `EquippedCart` dentro de `ReplicatedStorage.Assets.Carts`. Cada modelo pode definir estes atributos numéricos positivos:
