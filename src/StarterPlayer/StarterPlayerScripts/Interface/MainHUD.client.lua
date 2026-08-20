@@ -12,6 +12,8 @@ local BUTTON_TO_FRAME: {[string]: string} = {
 	IconBtn_Codes = "Codes",
 }
 local SLIDER_KNOB_NAME: string = "Knob"
+local IS_RAMP_CART_CHARACTER_ATTRIBUTE: string = "IsRampCartCharacter"
+local COIN_COUNTER_NAME: string = "CoinCounter"
 
 ------------------//DEPENDENCIES
 local modules: Folder = ReplicatedStorage:WaitForChild("Modules")
@@ -24,9 +26,13 @@ local playerGui: PlayerGui = localPlayer:WaitForChild("PlayerGui")
 
 local boundMainGui: ScreenGui?
 local framesFolder: Folder?
+local mainHud: Frame?
 local activeFrame: GuiObject?
 local coinAmountLabel: TextLabel?
+local cartCharacterConnection: RBXScriptConnection?
+local savedMainHudVisibility: {[GuiObject]: boolean} = {}
 local coinsBound = false
+local isCartMode = false
 
 ------------------//FUNCTIONS
 local function format_coins(value: any): string
@@ -51,6 +57,57 @@ local function update_coin_counter(value: any): ()
 	if coinAmountLabel then
 		coinAmountLabel.Text = format_coins(value)
 	end
+end
+
+local function set_main_hud_cart_mode(isCartModeActive: boolean): ()
+	if not mainHud then
+		return
+	end
+
+	if isCartModeActive then
+		if not isCartMode then
+			table.clear(savedMainHudVisibility)
+			for _, child in mainHud:GetChildren() do
+				if child:IsA("GuiObject") then
+					savedMainHudVisibility[child] = child.Visible
+				end
+			end
+			isCartMode = true
+		end
+
+		for _, child in mainHud:GetChildren() do
+			if child:IsA("GuiObject") then
+				child.Visible = child.Name == COIN_COUNTER_NAME
+			end
+		end
+		return
+	end
+
+	if not isCartMode then
+		return
+	end
+
+	for child, wasVisible in savedMainHudVisibility do
+		if child.Parent == mainHud then
+			child.Visible = wasVisible
+		end
+	end
+	table.clear(savedMainHudVisibility)
+	isCartMode = false
+end
+
+local function bind_character(newCharacter: Model): ()
+	if cartCharacterConnection then
+		cartCharacterConnection:Disconnect()
+		cartCharacterConnection = nil
+	end
+
+	local function update_cart_hud(): ()
+		set_main_hud_cart_mode(newCharacter:GetAttribute(IS_RAMP_CART_CHARACTER_ATTRIBUTE) == true)
+	end
+
+	cartCharacterConnection = newCharacter:GetAttributeChangedSignal(IS_RAMP_CART_CHARACTER_ATTRIBUTE):Connect(update_cart_hud)
+	update_cart_hud()
 end
 
 local function close_frame(frame: GuiObject): ()
@@ -115,11 +172,16 @@ local function bind_main_gui(mainGui: ScreenGui): ()
 	framesFolder = mainGui:WaitForChild("Frames") :: Folder
 	activeFrame = nil
 
-	local mainHud = mainGui:WaitForChild("MainHUD")
-	local coinCounter = mainHud:WaitForChild("CoinCounter")
-	local leftButton = mainHud:WaitForChild("LeftButton")
-	local rightButton = mainHud:WaitForChild("RightButton")
+	local currentMainHud = mainGui:WaitForChild("MainHUD") :: Frame
+	mainHud = currentMainHud
+	local coinCounter = currentMainHud:WaitForChild("CoinCounter")
+	local leftButton = currentMainHud:WaitForChild("LeftButton")
+	local rightButton = currentMainHud:WaitForChild("RightButton")
 	coinAmountLabel = coinCounter:WaitForChild("Amount") :: TextLabel
+	set_main_hud_cart_mode(
+		localPlayer.Character ~= nil
+			and localPlayer.Character:GetAttribute(IS_RAMP_CART_CHARACTER_ATTRIBUTE) == true
+	)
 
 	for _, frame in framesFolder:GetChildren() do
 		if frame:IsA("GuiObject") then
@@ -151,6 +213,11 @@ end
 
 ------------------//INIT
 bind_main_gui(playerGui:WaitForChild("Main") :: ScreenGui)
+
+localPlayer.CharacterAdded:Connect(bind_character)
+if localPlayer.Character then
+	bind_character(localPlayer.Character)
+end
 
 playerGui.ChildAdded:Connect(function(child: Instance)
 	if child.Name == "Main" and child:IsA("ScreenGui") then
