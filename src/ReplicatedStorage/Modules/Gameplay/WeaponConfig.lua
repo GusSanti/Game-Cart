@@ -2,6 +2,7 @@
 export type WeaponDefinition = {
 	id: string,
 	toolName: string,
+	hotbarImage: string?,
 	hasPinAnimation: boolean,
 	previewColor: Color3,
 	maxThrowDistance: number,
@@ -22,6 +23,7 @@ local weaponDefinitions: {[string]: WeaponDefinition} = {
 	Grenade = {
 		id = "Grenade",
 		toolName = "Granade",
+		hotbarImage = "",
 		hasPinAnimation = true,
 		previewColor = Color3.fromRGB(255, 120, 47),
 		maxThrowDistance = 115,
@@ -40,6 +42,7 @@ local weaponDefinitions: {[string]: WeaponDefinition} = {
 	Banana = {
 		id = "Banana",
 		toolName = "Banana",
+		hotbarImage = "rbxassetid://78445436248608",
 		hasPinAnimation = false,
 		previewColor = Color3.fromRGB(255, 225, 54),
 		maxThrowDistance = 90,
@@ -66,6 +69,7 @@ return table.freeze({
 	projectilesFolderName = "WeaponProjectiles",
 	trapsFolderName = "WeaponTraps",
 	weaponIdAttribute = "WeaponId",
+	hotbarImageAttribute = "HotbarImage",
 	allowRampAnimationAttribute = "AllowDuringRampSlide",
 	spinUntilAttribute = "CartSpinUntil",
 	externalLaunchSequenceAttribute = "CartExternalLaunchSequence",

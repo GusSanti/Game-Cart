@@ -32,6 +32,7 @@ flowchart LR
 - `RampService.server.lua` reconhece `JumpArea`, valida o mundo do jogador e controla o ciclo de carga e lançamento.
 - `RampCharacterService.lua` pré-monta e replica o próximo `Character` baseado no carrinho antes da entrada, corrige as juntas do rig e mantém uma cópia privada para restauração.
 - `CodeService.server.lua` valida códigos no servidor, registra resgates únicos e concede moedas usando o `DataUtility`.
+- `AdminCodes.server.lua` valida comandos de chat de administradores e entrega recompensas de ferramentas no `Backpack`.
 - `SettingsService.server.lua` valida e persiste as configurações de áudio, sombras e efeitos visuais recebidas do cliente.
 - `WeaponService.server.lua` valida arremessos, simula projéteis em coordenadas do mundo e aplica os efeitos de granada e banana nos carrinhos.
 - `QuestsService.server.lua` expõe o claim validado das missões, enquanto `QuestService.lua` mantém progresso, períodos e recompensas no perfil.
@@ -42,6 +43,7 @@ flowchart LR
 - `Audio/CharacterSounds.client.lua` reproduz sons locais associados ao personagem.
 - `Audio/LobbyMusic.client.lua` inicia a música de lobby em loop usando `SoundData` e `SoundUtility`.
 - `Interface/Bootstrap.client.lua` inicializa as animações de interface e os prompts de proximidade.
+- `Interface/Hotbar.client.lua` desativa a hotbar padrão, observa as ferramentas do jogador e renderiza os slots de `StarterGui.Main.MainHUD.Hotbar`.
 - `Interface/Settings.client.lua` conecta `StarterGui.Main.Frames.Settings` ao áudio, sombras e efeitos visuais locais e salva as preferências validadas pelo servidor.
 - `Interface/Quests.client.lua` renderiza os cards de `StarterGui.Main.Frames.Quests`, filtra as páginas diária, semanal e mensal e solicita claims ao servidor.
 - `Interface/DailyRewards.client.lua` renderiza os cards de `StarterGui.Main.Frames.DailyRewards.Content.Days`, atualiza ícone, valor e status das recompensas e solicita a coleta do dia atual.

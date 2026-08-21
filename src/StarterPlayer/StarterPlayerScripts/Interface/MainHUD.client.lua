@@ -14,6 +14,7 @@ local BUTTON_TO_FRAME: {[string]: string} = {
 local SLIDER_KNOB_NAME: string = "Knob"
 local IS_RAMP_CART_CHARACTER_ATTRIBUTE: string = "IsRampCartCharacter"
 local COIN_COUNTER_NAME: string = "CoinCounter"
+local HOTBAR_NAME: string = "Hotbar"
 
 ------------------//DEPENDENCIES
 local modules: Folder = ReplicatedStorage:WaitForChild("Modules")
@@ -77,7 +78,7 @@ local function set_main_hud_cart_mode(isCartModeActive: boolean): ()
 
 		for _, child in mainHud:GetChildren() do
 			if child:IsA("GuiObject") then
-				child.Visible = child.Name == COIN_COUNTER_NAME
+				child.Visible = child.Name == COIN_COUNTER_NAME or child.Name == HOTBAR_NAME
 			end
 		end
 		return

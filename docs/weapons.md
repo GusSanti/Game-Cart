@@ -23,3 +23,11 @@ Ao equipar `Granade` ou `Banana` durante a descida, o botão direito do mouse, `
 - `Weapons.Projectiles.BananaPeel`: peça visual da armadilha.
 
 As ferramentas usam o atributo `WeaponId`. Os IDs atuais são `Grenade` e `Banana`.
+
+## Hotbar
+
+`Hotbar.client.lua` desativa o CoreGui de mochila do Roblox e observa as ferramentas no `Backpack` e no `Character` do jogador. Cada tipo de item gera um slot a partir de `StarterGui.Main.MainHUD.Hotbar.SlotTemplate`; cópias do mesmo `WeaponId` ou nome são agrupadas em `Qty.Label` no formato `xN`.
+
+Os slots são `ImageButton`: clicar no slot equipa a ferramenta, e as teclas `1`–`0` da fileira superior ou do teclado numérico equipam os dez primeiros slots. A atualização usa eventos de inventário e uma única tarefa adiada para agrupar mudanças próximas, sem loop contínuo.
+
+`WeaponConfig.lua` aceita `hotbarImage` em cada definição. O valor pode ser um ID numérico ou uma URI `rbxassetid://`; quando estiver vazio, o `ImageLabel` `Item` fica sem imagem. Ferramentas genéricas também podem definir o atributo `HotbarImage`, e `TextureId` é usado como fallback.
